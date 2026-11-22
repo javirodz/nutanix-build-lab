@@ -190,4 +190,5 @@ table.grid tr.sel td { background: var(--accent-soft); }
 .foot { padding: 6px 20px 24px; color: var(--muted); font-size: 12px; }
 .foot p { margin: 2px 0; }
 .toast { opacity: 0; position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(80px); background: var(--ink); color: var(--bg); padding: 8px 16px; border-radius: 6px; transition: transform .25s, opacity .25s; z-index: 10; }
+.toast .undo { margin-left: 12px; background: none; border: 1px solid currentColor; color: inherit; border-radius: 4px; padding: 1px 8px; }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }

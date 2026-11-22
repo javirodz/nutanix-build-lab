@@ -29,7 +29,7 @@
     return {
       schema: 1,
       preset: opts.preset,
-      cluster: { name: opts.name, aos: 'AOS 7.x (example)', hypervisor: 'AHV', rf, vip: '10.10.10.50', dsip: '10.10.10.51', timezone: 'America/New_York' },
+      cluster: { name: opts.name, aos: 'AOS 7.x (example)', hypervisor: 'AHV', rf, vip: '10.10.10.50', dsip: '10.10.10.51', timezone: 'America/New_York', peAuth: 'Local admin only' },
       hardware: {
         model: 'NX-series 1U single node (generic)',
         sockets: 2, coresPerSocket: opts.cores || 24, ramGB: opts.ramGB || 1024,
@@ -47,6 +47,7 @@
         vmSwitch: 'vs1 (br1)', vmBondMode: 'balance-slb',
         mtu: 1500,
         vmNetworks: [
+          { id: 'net-mgmt', name: opts.name + '-Mgmt', mgmt: true, subnet: '10.10.10.0/24', gateway: '10.10.10.1', vs: 'vs0' },
           { id: 'net-prod', name: 'VM-Prod', vlan: 100, subnet: '10.10.100.0/24', gateway: '10.10.100.1', vs: twoByTwo ? 'vs1' : 'vs0' },
           { id: 'net-db', name: 'VM-DB', vlan: 110, subnet: '10.10.110.0/24', gateway: '10.10.110.1', vs: twoByTwo ? 'vs1' : 'vs0' },
           { id: 'net-dmz', name: 'VM-DMZ', vlan: 200, subnet: '10.10.200.0/24', gateway: '10.10.200.1', vs: twoByTwo ? 'vs1' : 'vs0' }
@@ -62,15 +63,16 @@
       services: {
         dns: ['10.10.5.10', '10.10.5.11'],
         ntp: ['0.pool.ntp.org', '1.pool.ntp.org', '2.pool.ntp.org'],
-        directory: 'lab.example (AD / LDAP)', smtp: 'smtp.lab.example:25', syslog: '10.10.5.20:514',
+        directory: 'lab.example (Active Directory)', directoryTarget: 'Prism Central only', smtp: 'smtp.lab.example:25', syslog: '10.10.5.20:514',
         lcmSource: 'Internet (Nutanix portal)', proxy: 'None'
       },
       storage: {
         planningOverheadPct: 10,
+        poolName: opts.name + '-SP',
+        defaultContainerRemoved: true,
         containers: [
-          { id: 'ctr-default', name: 'default-container', system: true, rf, compression: true, dedup: false, ecx: false },
           { id: 'ctr-mgmt', name: 'NutanixManagementShare', system: true, rf, compression: true, dedup: false, ecx: false },
-          { id: 'ctr-prod', name: 'VM-Prod', system: false, rf, compression: true, dedup: false, ecx: false }
+          { id: 'ctr-user', name: opts.name + '-CTR', system: false, rf, compression: true, dedup: false, ecx: false }
         ]
       },
       vms: opts.vms

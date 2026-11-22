@@ -1,6 +1,6 @@
 # Nutanix Build Lab
 
-An interactive, browser-based lab that shows what a Nutanix cluster looks like from different points of view. Three sample labs are included: 6 nodes at RF2 with one bond, 3 nodes at RF2, and 6 nodes at RF3 with four uplinks in two bonds (vs0 for host and CVM traffic, vs1 for VM traffic). All use AHV on generic NX-style nodes. Every object in the diagrams can be clicked to view or edit it, and the lab can be shared as a link or exported as JSON.
+An interactive, browser-based lab that shows what a Nutanix cluster looks like from different points of view. Three sample labs are included: 6 nodes at RF2 with one bond, 3 nodes at RF2, and 6 nodes at RF3 with four uplinks in two bonds (vs0 for host and CVM traffic, vs1 for VM traffic). All use AHV on generic NX-style nodes and follow the same build standard: the default container is deleted, the storage pool and user container are renamed after the cluster, a default subnet named after the cluster sits on the management VLAN, and Active Directory is connected to Prism Central only (Prism Element keeps its local admin account). Every object in the diagrams can be clicked to view or edit it, and the lab can be shared as a link or exported as JSON.
 
 Inspired by the NSX Build Lab at vconfig.pl.
 
@@ -21,7 +21,7 @@ Inspired by the NSX Build Lab at vconfig.pl.
 - Click any object to open its settings in the side panel. Changes save to the browser automatically.
 - **Share link** copies a URL that contains the full lab, so someone else opens the same design.
 - **Export / Import** saves or loads the lab as JSON.
-- **Load preset** replaces the current lab with the selected sample (click twice to confirm).
+- **Load a sample lab** (dropdown) replaces the current lab with the chosen sample. Use **Undo** in the message that appears to go back.
 - **Theme** switches between light and dark.
 
 ## Hosting on Cloudflare

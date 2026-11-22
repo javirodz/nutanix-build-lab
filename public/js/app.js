@@ -35,6 +35,9 @@
     if (!nw.layout) nw.layout = '1x2';
     if (!nw.vmSwitch) nw.vmSwitch = 'vs1 (br1)';
     if (!nw.vmBondMode) nw.vmBondMode = 'balance-slb';
+    if (!l.storage.poolName) l.storage.poolName = 'default-storage-pool';
+    if (!l.cluster.peAuth) l.cluster.peAuth = 'Local admin only';
+    if (!l.services.directoryTarget) l.services.directoryTarget = 'Prism Central only';
     nw.vmNetworks.forEach((v) => { if (!v.vs) v.vs = nw.layout === '2x2' ? 'vs1' : 'vs0'; if (nw.layout === '1x2') v.vs = 'vs0'; });
     l.nodes.forEach((n, i) => { if (nw.layout === '2x2') { if (!n.torAPort2) n.torAPort2 = 'Eth1/' + (i + 17); if (!n.torBPort2) n.torBPort2 = 'Eth1/' + (i + 17); } });
     if (nw.layout === '2x2' && /^2x 25GbE/.test(l.hardware.dataNics)) l.hardware.dataNics = '4x 25GbE SFP28 (2 dual-port cards)';
@@ -47,6 +50,11 @@
   /* ---------- calculations ---------- */
   const node = (id) => lab.nodes.find((n) => n.id === id);
   const net = (id) => lab.network.vmNetworks.find((n) => n.id === id);
+  const vlanText = (v) => {
+    if (!v) return '';
+    if (v.mgmt) return lab.network.mgmtTagging === 'Tagged' ? 'VLAN ' + lab.network.mgmtVlan : 'VLAN 0 (native ' + lab.network.mgmtVlan + ')';
+    return 'VLAN ' + v.vlan;
+  };
   const vmsOn = (id) => lab.vms.filter((v) => v.host === id);
   const pcOn = (id) => (lab.pc && lab.pc.host === id ? lab.pc : null);
   const cores = () => lab.hardware.sockets * lab.hardware.coresPerSocket;
@@ -223,7 +231,7 @@
     const chips = [
       { type: 'netcfg', id: 'mgmt', label: `Mgmt VLAN ${lab.network.mgmtVlan}  ${lab.network.mgmtSubnet}  (${lab.network.mgmtTagging})${two ? '  on ' + vs0 : ''}`, cls: 'br' },
       { type: 'netcfg', id: 'ipmi', label: `IPMI VLAN ${lab.network.ipmiVlan}  ${lab.network.ipmiSubnet}`, cls: 'ipmi' }
-    ].concat(lab.network.vmNetworks.map((v) => ({ type: 'vmnet', id: v.id, label: `${v.name}  VLAN ${v.vlan}  ${v.subnet}${two ? '  on ' + (v.vs || 'vs0') : ''}`, cls: 'uvm' })));
+    ].concat(lab.network.vmNetworks.map((v) => ({ type: 'vmnet', id: v.id, label: `${v.name}  ${vlanText(v)}  ${v.subnet}${two ? '  on ' + (v.vs || 'vs0') : ''}`, cls: 'uvm' })));
     let cx = 20, cy = ly + 12;
     chips.forEach((c) => {
       const w = c.label.length * 6.4 + 20;
@@ -253,7 +261,7 @@
       s += L(x + ctrW / 2, 70, x + ctrW / 2, 96, 'wire');
     });
     // pool
-    s += G('pool', 'pool', R(10, 96, W - 20, 44, 'pool') + T(W / 2, 116, 'Storage pool (all drives in the cluster)', 't-title', 'middle') + T(W / 2, 132, `${fmt(n * nodeRawTB())} TB raw across ${n * lab.hardware.diskCount} drives`, 't-muted', 'middle'));
+    s += G('pool', 'pool', R(10, 96, W - 20, 44, 'pool') + T(W / 2, 116, 'Storage pool: ' + lab.storage.poolName, 't-title', 'middle') + T(W / 2, 132, `All drives in the cluster: ${fmt(n * nodeRawTB())} TB raw across ${n * lab.hardware.diskCount} drives`, 't-muted', 'middle'));
     // nodes
     lab.nodes.forEach((nd, i) => {
       const x = hx(i), y = 176;
@@ -292,7 +300,7 @@
       <div class="card"><div class="lbl">Usable estimate at RF${rf}</div><div class="big">${fmt(c.usable)} TB</div><div class="lbl">(raw - reserve) x (1 - overhead) / RF${rf}, before data reduction</div></div>
       <div class="card ${ok ? 'ok' : 'bad'}"><div class="lbl">Provisioned VM disks</div><div class="big">${fmt(c.prov)} TB</div><div class="lbl">${ok ? 'fits the usable estimate' : 'exceeds the usable estimate (thin provisioning still allowed)'}</div></div>
     </div>`;
-    return head('Storage view', `The Distributed Storage Fabric pools every data drive in the cluster. Containers are logical datastores carved from the pool, each with its own replication factor and data reduction settings. This is a planning estimate only; use Nutanix Sizer for real designs.`, '<button class="btn" data-act="addCtr">Add container</button>') + s + cards;
+    return head('Storage view', `The Distributed Storage Fabric pools every data drive in the cluster. Containers are logical datastores carved from the pool, each with its own replication factor and data reduction settings. ${lab.storage.defaultContainerRemoved ? 'In this build the default container was deleted after cluster creation, and the storage pool and user container are renamed after the cluster so they are easy to tell apart in Prism Central. ' : ''}Capacity is a planning estimate only; use Nutanix Sizer for real designs.`, '<button class="btn" data-act="addCtr">Add container</button>') + s + cards;
   };
 
   VIEWS.resources = function () {
@@ -342,7 +350,7 @@
     let t = '<table class="grid"><thead><tr><th>VM</th><th>OS</th><th>vCPU</th><th>Memory</th><th>Disk</th><th>Network</th><th>Host</th></tr></thead><tbody>';
     lab.vms.forEach((v) => {
       const nd = node(v.host), nw = net(v.network);
-      t += `<tr class="click${isSel('vm', v.id) ? ' sel' : ''}" data-type="vm" data-id="${esc(v.id)}"><td><b>${esc(v.name)}</b></td><td>${esc(v.os)}</td><td>${v.vcpu}</td><td>${v.ramGB} GB</td><td>${v.diskGB} GB</td><td>${esc(nw ? nw.name + ' (VLAN ' + nw.vlan + ')' : 'none')}</td><td>${esc(nd ? nd.name : 'unassigned')}</td></tr>`;
+      t += `<tr class="click${isSel('vm', v.id) ? ' sel' : ''}" data-type="vm" data-id="${esc(v.id)}"><td><b>${esc(v.name)}</b></td><td>${esc(v.os)}</td><td>${v.vcpu}</td><td>${v.ramGB} GB</td><td>${v.diskGB} GB</td><td>${esc(nw ? nw.name + ' (' + vlanText(nw) + ')' : 'none')}</td><td>${esc(nd ? nd.name : 'unassigned')}</td></tr>`;
     });
     t += '</tbody></table>';
     return head('VM view', 'Where each workload runs. Every host has its own CVM; Prism Central runs as a regular VM on the cluster. Click a VM to resize it, change its network or move it to another host.', '<button class="btn primary" data-act="addVm">Add VM</button>') + h + t;
@@ -359,26 +367,37 @@
       { id: 'smtp', label: 'SMTP', val: sv.smtp, x: 670 },
       { id: 'syslog', label: 'Syslog', val: sv.syslog, x: 880 }
     ];
+    const dirBoth = sv.directoryTarget === 'Prism Central and Prism Element';
     svcs.forEach((x) => {
       s += G('service', x.id, R(x.x, 20, 180, 56, 'svc') + T(x.x + 90, 42, x.label, 't-title', 'middle') + T(x.x + 90, 62, x.val.length > 24 ? x.val.slice(0, 23) + '...' : x.val, 't-mono t-muted', 'middle'));
-      s += C(x.x + 90, 76, x.x < 500 ? 250 : 760, 190, 'wire');
+      if (x.id === 'dns' || x.id === 'ntp') {
+        s += C(x.x + 80, 76, 230 + (x.id === 'ntp' ? 40 : 0), 190, 'wire') + C(x.x + 100, 76, 740 + (x.id === 'ntp' ? 20 : 0), 190, 'wire');
+      } else if (x.id === 'directory') {
+        s += C(x.x + 110, 76, 800, 190, 'wire-a') + T(x.x + 190, 132, 'AD sign-in', 't-muted', 'middle');
+        if (dirBoth) s += C(x.x + 70, 76, 330, 190, 'wire-a');
+      } else {
+        s += C(x.x + 90, 76, 860 + (x.id === 'syslog' ? 40 : 0), 190, 'wire');
+      }
     });
     // PE
-    s += G('cluster', 'cluster', R(80, 190, 360, 190, 'host') + T(260, 214, 'Prism Element: ' + lab.cluster.name, 't-title', 'middle') +
-      T(100, 242, 'Cluster virtual IP', 't-muted') + T(420, 242, lab.cluster.vip, 't-mono', 'end') +
-      T(100, 264, 'Data services IP (iSCSI)', 't-muted') + T(420, 264, lab.cluster.dsip, 't-mono', 'end') +
-      T(100, 286, 'Software', 't-muted') + T(420, 286, lab.cluster.aos, 't-mono', 'end') +
-      T(100, 308, 'Redundancy factor', 't-muted') + T(420, 308, 'RF' + lab.cluster.rf + ' (FT' + ft() + ')', 't-mono', 'end'));
+    const peLocal = lab.cluster.peAuth !== 'Directory users allowed';
+    s += G('cluster', 'cluster', R(80, 190, 360, 190, 'host') + T(260, 212, 'Prism Element: ' + lab.cluster.name, 't-title', 'middle') +
+      T(100, 236, 'Cluster virtual IP', 't-muted') + T(420, 236, lab.cluster.vip, 't-mono', 'end') +
+      T(100, 256, 'Data services IP (iSCSI)', 't-muted') + T(420, 256, lab.cluster.dsip, 't-mono', 'end') +
+      T(100, 276, 'Software', 't-muted') + T(420, 276, lab.cluster.aos, 't-mono', 'end') +
+      T(100, 296, 'Redundancy factor', 't-muted') + T(420, 296, 'RF' + lab.cluster.rf + ' (FT' + ft() + ')', 't-mono', 'end') +
+      T(100, 316, 'Sign-in', 't-muted') + T(420, 316, peLocal ? 'Local admin only' : 'Local + directory users', 't-mono', 'end'));
     lab.nodes.forEach((nd, i) => {
-      s += G('cvm', nd.id, R(96 + i * (328 / lab.nodes.length), 326, 328 / lab.nodes.length - 6, 40, 'cvm' + (fail.cvms.has(nd.id) || fail.nodes.has(nd.id) ? ' down' : ''), 4) + T(96 + i * (328 / lab.nodes.length) + (328 / lab.nodes.length - 6) / 2, 350, 'CVM' + (i + 1), 't-small', 'middle'));
+      s += G('cvm', nd.id, R(96 + i * (328 / lab.nodes.length), 330, 328 / lab.nodes.length - 6, 38, 'cvm' + (fail.cvms.has(nd.id) || fail.nodes.has(nd.id) ? ' down' : ''), 4) + T(96 + i * (328 / lab.nodes.length) + (328 / lab.nodes.length - 6) / 2, 353, 'CVM' + (i + 1), 't-small', 'middle'));
     });
     // PC
-    s += G('pc', 'pc', R(640, 190, 380, 190, 'ipmi') + T(830, 214, 'Prism Central: ' + lab.pc.name, 't-title', 'middle') +
-      T(660, 242, 'Deployment', 't-muted') + T(1000, 242, lab.pc.deployment + ', ' + lab.pc.size, 't-mono', 'end') +
-      T(660, 264, 'IP / FQDN', 't-muted') + T(1000, 264, lab.pc.ip + ' / ' + lab.pc.fqdn, 't-mono', 'end') +
-      T(660, 286, 'Runs on', 't-muted') + T(1000, 286, (node(lab.pc.host) || {}).name || 'unassigned', 't-mono', 'end') +
-      T(660, 308, 'Size (example)', 't-muted') + T(1000, 308, lab.pc.vcpu + ' vCPU / ' + lab.pc.ramGB + ' GB', 't-mono', 'end') +
-      T(660, 340, 'Multicluster management, LCM, reporting,', 't-muted') + T(660, 356, 'categories, policies and add-on services', 't-muted'));
+    s += G('pc', 'pc', R(640, 190, 380, 190, 'ipmi') + T(830, 212, 'Prism Central: ' + lab.pc.name, 't-title', 'middle') +
+      T(660, 236, 'Deployment', 't-muted') + T(1000, 236, lab.pc.deployment + ', ' + lab.pc.size, 't-mono', 'end') +
+      T(660, 256, 'IP / FQDN', 't-muted') + T(1000, 256, lab.pc.ip + ' / ' + lab.pc.fqdn, 't-mono', 'end') +
+      T(660, 276, 'Runs on', 't-muted') + T(1000, 276, (node(lab.pc.host) || {}).name || 'unassigned', 't-mono', 'end') +
+      T(660, 296, 'Size (example)', 't-muted') + T(1000, 296, lab.pc.vcpu + ' vCPU / ' + lab.pc.ramGB + ' GB', 't-mono', 'end') +
+      T(660, 316, 'Directory sign-in', 't-muted') + T(1000, 316, 'Active Directory', 't-mono', 'end') +
+      T(660, 346, 'Multicluster management, LCM, reporting,', 't-muted') + T(660, 362, 'categories, policies and add-on services', 't-muted'));
     s += L(440, 285, 640, 285, 'wire-a') + T(540, 276, 'registered', 't-muted', 'middle') + T(540, 302, 'TCP 9440', 't-mono t-muted', 'middle');
     // internet side
     s += G('service', 'lcmSource', R(640, 430, 180, 56, 'svc') + T(730, 452, 'LCM updates', 't-title', 'middle') + T(730, 472, sv.lcmSource.length > 28 ? sv.lcmSource.slice(0, 27) + '...' : sv.lcmSource, 't-muted', 'middle'));
@@ -387,7 +406,7 @@
     s += G('netcfg', 'ipmi', R(80, 430, 360, 56, 'ipmi') + T(260, 452, 'Out-of-band: IPMI on VLAN ' + lab.network.ipmiVlan, 't-title', 'middle') + T(260, 472, 'BMC consoles used by Foundation and for recovery', 't-muted', 'middle'));
     s += L(260, 380, 260, 430, 'wire-ipmi');
     s += '</svg>';
-    return head('Management view', 'Prism Element runs inside the cluster on the CVMs and manages one cluster. Prism Central is a separate VM that registers one or more clusters for central management. Both depend on DNS and NTP being correct before cluster creation; click a service to edit it.') + s;
+    return head('Management view', `Prism Element runs inside the cluster on the CVMs and manages one cluster. Prism Central is a separate VM that registers one or more clusters for central management. ${dirBoth ? 'Active Directory is connected to both Prism Central and Prism Element.' : 'Active Directory is connected only to Prism Central, so directory users sign in there and Prism Element keeps only its local admin account.'} Both depend on DNS and NTP being correct before cluster creation; click a service to edit it.`) + s;
   };
 
   VIEWS.failure = function () {
@@ -476,7 +495,7 @@
   /* ---------- editor ---------- */
   const F = (key, label, opt = {}) => Object.assign({ key, label }, opt);
   const nodeOpts = () => lab.nodes.map((n) => [n.id, n.name]);
-  const netOpts = () => [['', 'none']].concat(lab.network.vmNetworks.map((n) => [n.id, `${n.name} (VLAN ${n.vlan})`]));
+  const netOpts = () => [['', 'none']].concat(lab.network.vmNetworks.map((n) => [n.id, `${n.name} (${vlanText(n)})`]));
 
   const BONDS = [['active-backup', 'active-backup'], ['balance-slb', 'balance-slb'], ['balance-tcp', 'balance-tcp (LACP)']];
   function editorFor(type, id) {
@@ -501,7 +520,8 @@
           note: 'One CVM runs on every node and serves storage for that host. Sizing here is an example; actual CVM sizing depends on the AOS release, node memory and enabled features.',
           extra: type === 'cvm' ? kv([['CVM IP (eth0)', (node(id) || {}).cvmIp], ['Internal (eth1)', '192.168.5.2'], ['Host side (virbr0)', '192.168.5.1']]) : '' };
       case 'cluster':
-        return { kind: 'Cluster', title: lab.cluster.name, obj: lab.cluster, fields: [F('name', 'Cluster name'), F('aos', 'AOS version'), F('hypervisor', 'Hypervisor', { ro: true }), F('rf', 'Redundancy factor', { opts: [[2, 'RF2 (tolerates 1 failure)'], [3, 'RF3 (tolerates 2, needs 5+ nodes)']], num: 1 }), F('vip', 'Cluster virtual IP'), F('dsip', 'Data services IP'), F('timezone', 'Time zone')] };
+        return { kind: 'Cluster', title: lab.cluster.name, obj: lab.cluster, fields: [F('name', 'Cluster name'), F('aos', 'AOS version'), F('hypervisor', 'Hypervisor', { ro: true }), F('rf', 'Redundancy factor', { opts: [[2, 'RF2 (tolerates 1 failure)'], [3, 'RF3 (tolerates 2, needs 5+ nodes)']], num: 1 }), F('vip', 'Cluster virtual IP'), F('dsip', 'Data services IP'), F('timezone', 'Time zone'), F('peAuth', 'Prism Element sign-in', { opts: [['Local admin only', 'Local admin only (directory on Prism Central)'], ['Directory users allowed', 'Directory users allowed on Prism Element']] })],
+          note: 'Renaming the cluster also renames the storage pool, user container and management subnet when they start with the old cluster name.' };
       case 'pc':
         return { kind: 'Prism Central', title: lab.pc.name, obj: lab.pc, fields: [F('name', 'VM name'), F('deployment', 'Deployment', { opts: [['Single VM', 'Single VM'], ['Scale-out (3 VMs)', 'Scale-out (3 VMs)']] }), F('size', 'Size', { opts: [['Small', 'Small'], ['Large', 'Large'], ['X-Large', 'X-Large']] }), F('vcpu', 'vCPU', { num: 1 }), F('ramGB', 'Memory (GB)', { num: 1 }), F('ip', 'IP address'), F('fqdn', 'FQDN'), F('host', 'Runs on host', { opts: nodeOpts() })],
           note: 'vCPU and memory are example values. Check the Prism Central sizing table for your pc release before deploying.' };
@@ -516,6 +536,12 @@
       }
       case 'vmnet': {
         const v = net(id); if (!v) return null;
+        if (v.mgmt) {
+          return { kind: 'VM network (management VLAN)', title: v.name, obj: v, fields: [F('name', 'Name'), F('subnet', 'Subnet'), F('gateway', 'Gateway')],
+            note: `Default subnet on the same VLAN as the AHV hosts and CVMs, named after the cluster so it is easy to identify in Prism Central. The management VLAN is ${lab.network.mgmtTagging === 'Tagged' ? 'tagged, so this subnet uses VLAN ' + lab.network.mgmtVlan : 'native (untagged) on the switch, so this subnet uses VLAN ID 0 in AHV'}.`,
+            extra: kv([['VLAN in AHV', vlanText(v)], ['Virtual switch', 'vs0']]),
+            del: () => { lab.network.vmNetworks = lab.network.vmNetworks.filter((x) => x.id !== id); lab.vms.forEach((x) => { if (x.network === id) x.network = ''; }); }, delLabel: 'Delete subnet' };
+        }
         return { kind: 'VM network', title: v.name, obj: v, fields: [F('name', 'Name'), F('vlan', 'VLAN ID', { num: 1 }), F('subnet', 'Subnet'), F('gateway', 'Gateway')].concat(lab.network.layout === '2x2' ? [F('vs', 'Virtual switch', { opts: [['vs0', 'vs0 (br0, with management)'], ['vs1', 'vs1 (br1, VM traffic)']] })] : []),
           note: 'VM networks are VLAN-backed subnets on a virtual switch. The VLAN must be trunked on the ToR ports of that virtual switch for every host.',
           del: () => { lab.network.vmNetworks = lab.network.vmNetworks.filter((x) => x.id !== id); lab.vms.forEach((x) => { if (x.network === id) x.network = ''; }); }, delLabel: 'Delete network' };
@@ -538,13 +564,14 @@
           del: c.system ? null : () => { lab.storage.containers = lab.storage.containers.filter((x) => x.id !== id); }, delLabel: 'Delete container' };
       }
       case 'pool':
-        return { kind: 'Storage pool', title: 'Storage pool', obj: lab.storage, fields: [F('planningOverheadPct', 'Planning overhead (%)', { num: 1 })],
-          note: 'Overhead is your own planning assumption for system space, metadata and headroom. It is not a Nutanix published figure.' };
+        return { kind: 'Storage pool', title: lab.storage.poolName, obj: lab.storage, fields: [F('poolName', 'Storage pool name'), F('defaultContainerRemoved', 'Default container deleted after cluster creation', { bool: 1 }), F('planningOverheadPct', 'Planning overhead (%)', { num: 1 })],
+          note: 'A cluster has one storage pool. Renaming it after the cluster makes it easy to identify when many clusters are registered to Prism Central. Overhead is your own planning assumption for system space, metadata and headroom, not a Nutanix published figure.' };
       case 'service': {
         const labels = { dns: 'DNS servers (comma separated)', ntp: 'NTP servers (comma separated)', directory: 'Directory service', smtp: 'SMTP relay', syslog: 'Syslog target', lcmSource: 'LCM source', proxy: 'HTTP proxy' };
         const isList = id === 'dns' || id === 'ntp';
-        return { kind: 'Infrastructure service', title: labels[id].replace(/ \(.*\)/, ''), obj: lab.services, fields: [F(id, labels[id], isList ? { list: 1 } : (id === 'lcmSource' ? { opts: [['Internet (Nutanix portal)', 'Internet (Nutanix portal)'], ['Dark site (local web server)', 'Dark site (local web server)']] } : {}))],
-          note: id === 'ntp' ? 'Use reliable NTP sources reachable from the CVMs. Time drift between CVMs causes cluster issues.' : (id === 'dns' ? 'CVMs and Prism Central need working forward and reverse DNS.' : '') };
+        const extraF = id === 'directory' ? [F('directoryTarget', 'Connected to', { opts: [['Prism Central only', 'Prism Central only'], ['Prism Central and Prism Element', 'Prism Central and Prism Element']] })] : [];
+        return { kind: 'Infrastructure service', title: labels[id].replace(/ \(.*\)/, ''), obj: lab.services, fields: [F(id, labels[id], isList ? { list: 1 } : (id === 'lcmSource' ? { opts: [['Internet (Nutanix portal)', 'Internet (Nutanix portal)'], ['Dark site (local web server)', 'Dark site (local web server)']] } : {}))].concat(extraF),
+          note: id === 'ntp' ? 'Use reliable NTP sources reachable from the CVMs. Time drift between CVMs causes cluster issues.' : (id === 'dns' ? 'CVMs and Prism Central need working forward and reverse DNS.' : (id === 'directory' ? 'Directory users sign in through Prism Central. Prism Element keeps only its local admin account, so access to each cluster is managed in one place.' : '')) };
       }
     }
     return null;
@@ -586,7 +613,9 @@
       if (el.dataset.num) { val = Number(val); if (!isFinite(val)) return; }
       if (el.dataset.list) val = String(val).split(',').map((x) => x.trim()).filter(Boolean);
       if (type === 'cluster' && k === 'rf' && val === 3 && lab.nodes.length < 5) { toast('RF3 needs at least 5 nodes'); el.value = String(ed.obj.rf); return; }
+      const oldVal = ed.obj[k];
       ed.obj[k] = val;
+      if (type === 'cluster' && k === 'name' && oldVal && val) renameFromCluster(String(oldVal), String(val));
       normalize(lab);
       save(); render(false);
       if (k === 'layout') { openEditor(type, id); return; }
@@ -596,6 +625,12 @@
     if (del) del.onclick = () => { ed.del(); sel = null; save(); render(); clearPanel(); };
     $('#btnClose').onclick = () => { sel = null; clearPanel(); render(false); };
     render(false);
+  }
+  function renameFromCluster(oldN, newN) {
+    const fix = (s) => (typeof s === 'string' && s.indexOf(oldN) === 0 ? newN + s.slice(oldN.length) : s);
+    lab.storage.poolName = fix(lab.storage.poolName);
+    lab.storage.containers.forEach((c) => { if (!c.system) c.name = fix(c.name); });
+    lab.network.vmNetworks.forEach((v) => { v.name = fix(v.name); });
   }
   function clearPanel() {
     $('#panel').innerHTML = '<div class="panel-empty"><h3>Details</h3><p>Select a node, switch, VM, network, container or service in the diagram to see its settings here. Changes are saved in this browser automatically.</p></div>';
@@ -688,8 +723,16 @@
     });
     $('#btnTheme').onclick = () => { const d = document.documentElement; d.dataset.theme = d.dataset.theme === 'dark' ? 'light' : 'dark'; try { localStorage.setItem(THEME, d.dataset.theme); } catch (e) { /* ignore */ } };
     const ps = $('#presetSel');
-    ps.innerHTML = Object.keys(window.NBL_PRESETS).map((k) => `<option value="${k}"${lab.preset === k ? ' selected' : ''}>${esc(window.NBL_PRESETS[k].label)}</option>`).join('');
-    $('#btnReset').onclick = () => { if (!confirmReset()) return; lab = normalize(window.NBL_SAMPLE(ps.value)); fail.nodes.clear(); fail.cvms.clear(); fail.tors.clear(); fail.disk = ''; sel = null; save(); render(true); toast('Preset loaded'); };
+    const syncPreset = () => { ps.innerHTML = '<option value="">Load a sample lab...</option>' + Object.keys(window.NBL_PRESETS).map((k) => `<option value="${k}">${esc(window.NBL_PRESETS[k].label)}</option>`).join(''); ps.value = ''; };
+    syncPreset();
+    ps.onchange = () => {
+      if (!ps.value) return;
+      const prev = JSON.stringify(lab);
+      lab = normalize(window.NBL_SAMPLE(ps.value));
+      fail.nodes.clear(); fail.cvms.clear(); fail.tors.clear(); fail.disk = ''; sel = null;
+      save(); render(true); syncPreset();
+      toast('Loaded: ' + lab.cluster.name + ', ' + lab.nodes.length + ' nodes, RF' + lab.cluster.rf, () => { lab = normalize(JSON.parse(prev)); save(); render(true); toast('Previous lab restored'); });
+    };
     $('#btnExport').onclick = () => {
       const blob = new Blob([JSON.stringify(lab, null, 2)], { type: 'application/json' });
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = (lab.cluster.name || 'nutanix-lab') + '.json'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -706,9 +749,12 @@
     };
     render(true);
   });
-  let resetArmed = 0;
-  function confirmReset() { const now = Date.now(); if (now - resetArmed < 3000) { resetArmed = 0; return true; } resetArmed = now; toast('Click Load preset again to replace the current lab'); return false; }
 
   let toastT;
-  function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2200); }
+  function toast(msg, undo) {
+    const t = $('#toast');
+    t.textContent = msg;
+    if (undo) { const b = document.createElement('button'); b.textContent = 'Undo'; b.className = 'undo'; b.onclick = () => { t.classList.remove('show'); undo(); }; t.appendChild(b); }
+    t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), undo ? 7000 : 2200);
+  }
 })();
