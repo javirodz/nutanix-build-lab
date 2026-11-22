@@ -24,26 +24,26 @@ Inspired by the NSX Build Lab at vconfig.pl.
 - **Load preset** replaces the current lab with the selected sample (click twice to confirm).
 - **Theme** switches between light and dark.
 
-## Hosting on Cloudflare Pages
+## Hosting on Cloudflare
 
-The site is plain HTML, CSS and JavaScript with no build step.
+The site is plain HTML, CSS and JavaScript with no build step. It is deployed as a Cloudflare Worker with static assets, connected to this GitHub repository.
 
-1. In Cloudflare Pages, connect this GitHub repository.
-2. Framework preset: **None**. Build command: leave empty. Build output directory: `/`.
-3. Every push to `main` redeploys the site.
+- `wrangler.jsonc` points Cloudflare at the `public/` folder.
+- Every push to `main` redeploys the site.
 
-To run it locally, open `index.html` in a browser, or serve the folder with any static web server (for example `python -m http.server`).
+To run it locally, open `public/index.html` in a browser, or serve the `public/` folder with any static web server (for example `python -m http.server`).
 
 ## Project layout
 
 ```
-index.html        page shell, toolbar and tabs
-css/style.css     light and dark theme, layout
-js/sample.js      the sample lab presets (all values are examples)
-js/app.js         views, editor panel, calculations, share/export
+wrangler.jsonc           Cloudflare deployment settings
+public/index.html        page shell, toolbar and tabs
+public/css/style.css     light and dark theme, layout
+public/js/sample.js      the sample lab presets (all values are examples)
+public/js/app.js         views, editor panel, calculations, share/export
 ```
 
-To change the default lab, edit `js/sample.js`. Bump `schema` only if the data structure changes.
+To change the sample labs, edit `public/js/sample.js`. Bump `schema` only if the data structure changes.
 
 ## Notes on accuracy
 
