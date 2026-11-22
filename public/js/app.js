@@ -35,6 +35,7 @@
     if (!nw.layout) nw.layout = '1x2';
     if (!nw.vmSwitch) nw.vmSwitch = 'vs1 (br1)';
     if (!nw.vmBondMode) nw.vmBondMode = 'balance-slb';
+    if (l.pc && l.pc.deployed === undefined) l.pc.deployed = true;
     if (!l.storage.poolName) l.storage.poolName = 'default-storage-pool';
     if (!l.cluster.peAuth) l.cluster.peAuth = 'Local admin only';
     if (!l.services.directoryTarget) l.services.directoryTarget = 'Prism Central only';
@@ -56,7 +57,8 @@
     return 'VLAN ' + v.vlan;
   };
   const vmsOn = (id) => lab.vms.filter((v) => v.host === id);
-  const pcOn = (id) => (lab.pc && lab.pc.host === id ? lab.pc : null);
+  const pcUp = () => !!(lab.pc && lab.pc.deployed !== false);
+  const pcOn = (id) => (pcUp() && lab.pc.host === id ? lab.pc : null);
   const cores = () => lab.hardware.sockets * lab.hardware.coresPerSocket;
   const nodeRawTB = () => lab.hardware.diskCount * lab.hardware.diskSizeTB;
   const ft = () => (Number(lab.cluster.rf) === 3 ? 2 : 1);
@@ -77,8 +79,8 @@
     const n = lab.nodes.length;
     const ramTotal = n * lab.hardware.ramGB;
     const ramCvm = n * lab.cvm.ramGB;
-    const ramWork = lab.vms.reduce((a, v) => a + Number(v.ramGB), 0) + (lab.pc ? Number(lab.pc.ramGB) : 0);
-    const vcpuWork = lab.vms.reduce((a, v) => a + Number(v.vcpu), 0) + (lab.pc ? Number(lab.pc.vcpu) : 0);
+    const ramWork = lab.vms.reduce((a, v) => a + Number(v.ramGB), 0) + (pcUp() ? Number(lab.pc.ramGB) : 0);
+    const vcpuWork = lab.vms.reduce((a, v) => a + Number(v.vcpu), 0) + (pcUp() ? Number(lab.pc.vcpu) : 0);
     const haRam = (n - ft()) * (lab.hardware.ramGB - lab.cvm.ramGB);
     const raw = n * nodeRawTB();
     const rf = Number(lab.cluster.rf);
@@ -139,6 +141,7 @@
       t += `<tr class="click${isSel('node', n.id) ? ' sel' : ''}" data-type="node" data-id="${esc(n.id)}"><td><b>${esc(n.name)}</b></td><td class="mono">${esc(n.torAPort)}${two ? ' / ' + esc(n.torAPort2 || '') : ''}</td><td class="mono">${esc(n.torBPort)}${two ? ' / ' + esc(n.torBPort2 || '') : ''}</td><td class="mono">${esc(n.oobPort)}</td><td class="mono">${esc(n.hostIp)}</td><td class="mono">${esc(n.cvmIp)}</td><td class="mono">${esc(n.ipmiIp)}</td></tr>`;
     });
     t += '</tbody></table>';
+    t = '<div style="overflow-x:auto">' + t + '</div>';
 
     const hw = lab.hardware;
     const cards = `<div class="cards">
@@ -162,7 +165,7 @@
     const torA = { x: W * 0.22 - 90, y: 100 }, torB = { x: W * 0.55 - 90, y: 100 }, oob = { x: W - 220, y: 100 };
     const vs0 = String(lab.network.virtualSwitch).split(' ')[0];
     const vs1 = String(lab.network.vmSwitch || 'vs1').split(' ')[0];
-    let s = `<svg class="diagram" viewBox="0 0 ${W} ${HY + HH + 110}">`;
+    let s = `<svg class="diagram" viewBox="0 0 ${W} ${HY + HH + 110}" style="min-width:${Math.round(W * 0.72)}px">`;
     s += R(W * 0.385 - 110, 14, 220, 40, 'svc') + T(W * 0.385, 32, 'Upstream / core network', 't-title', 'middle') + T(W * 0.385, 47, 'Routed gateways for all VLANs', 't-muted', 'middle');
     s += C(W * 0.385 - 40, 54, torA.x + 90, torA.y, 'wire') + C(W * 0.385 + 40, 54, torB.x + 90, torB.y, 'wire');
     s += L(torA.x + 180, torA.y + 25, torB.x, torB.y + 25, 'peer') + T((torA.x + 180 + torB.x) / 2, torA.y + 18, 'MLAG / vPC peer link', 't-muted', 'middle');
@@ -254,7 +257,7 @@
     let s = `<svg class="diagram" viewBox="0 0 ${W} 440">${defs}`;
     // containers
     const ctrs = lab.storage.containers;
-    const ctrW = Math.min(240, (W - 40 - (ctrs.length - 1) * 12) / ctrs.length);
+    const ctrW = Math.min(240, (W - 40 - (ctrs.length - 1) * 12) / Math.max(1, ctrs.length));
     ctrs.forEach((c, i) => {
       const x = 20 + i * (ctrW + 12);
       s += G('container', c.id, R(x, 16, ctrW, 54, 'ctr') + T(x + ctrW / 2, 36, c.name, 't-title', 'middle') + T(x + ctrW / 2, 55, `RF${c.rf}${c.compression ? ', compression' : ''}${c.dedup ? ', dedup' : ''}${c.ecx ? ', EC-X' : ''}`, 't-muted', 'middle'));
@@ -391,7 +394,9 @@
       s += G('cvm', nd.id, R(96 + i * (328 / lab.nodes.length), 330, 328 / lab.nodes.length - 6, 38, 'cvm' + (fail.cvms.has(nd.id) || fail.nodes.has(nd.id) ? ' down' : ''), 4) + T(96 + i * (328 / lab.nodes.length) + (328 / lab.nodes.length - 6) / 2, 353, 'CVM' + (i + 1), 't-small', 'middle'));
     });
     // PC
-    s += G('pc', 'pc', R(640, 190, 380, 190, 'ipmi') + T(830, 212, 'Prism Central: ' + lab.pc.name, 't-title', 'middle') +
+    if (!pcUp()) {
+      s += `<g class="obj" data-act="deployPc">${R(640, 190, 380, 190, 'svc')}${T(830, 270, 'Prism Central not deployed', 't-title', 'middle')}${T(830, 292, 'Click to deploy it on this cluster', 't-muted', 'middle')}</g>`;
+    } else s += G('pc', 'pc', R(640, 190, 380, 190, 'ipmi') + T(830, 212, 'Prism Central: ' + lab.pc.name, 't-title', 'middle') +
       T(660, 236, 'Deployment', 't-muted') + T(1000, 236, lab.pc.deployment + ', ' + lab.pc.size, 't-mono', 'end') +
       T(660, 256, 'IP / FQDN', 't-muted') + T(1000, 256, lab.pc.ip + ' / ' + lab.pc.fqdn, 't-mono', 'end') +
       T(660, 276, 'Runs on', 't-muted') + T(1000, 276, (node(lab.pc.host) || {}).name || 'unassigned', 't-mono', 'end') +
@@ -407,6 +412,32 @@
     s += L(260, 380, 260, 430, 'wire-ipmi');
     s += '</svg>';
     return head('Management view', `Prism Element runs inside the cluster on the CVMs and manages one cluster. Prism Central is a separate VM that registers one or more clusters for central management. ${dirBoth ? 'Active Directory is connected to both Prism Central and Prism Element.' : 'Active Directory is connected only to Prism Central, so directory users sign in there and Prism Element keeps only its local admin account.'} Both depend on DNS and NTP being correct before cluster creation; click a service to edit it.`) + s;
+  };
+
+  const CONCEPTS = [
+    ['Hyperconverged infrastructure (HCI)', 'Every node contributes compute, memory and storage. Capacity and performance grow by adding nodes, with no separate SAN or storage array.'],
+    ['AHV', 'The Nutanix hypervisor, based on KVM and included with AOS. Each node runs AHV with one Controller VM.'],
+    ['Controller VM (CVM)', 'Runs the AOS storage and cluster services on every node. It owns the local data drives and serves storage I/O for the VMs on its host. If a CVM is down, I/O is redirected to CVMs on other hosts.'],
+    ['Distributed Storage Fabric', 'Pools the drives of all nodes into one storage pool. Storage containers are carved from the pool, and new writes stay on the local node when possible (data locality).'],
+    ['Replication factor (RF)', 'RF2 keeps two copies of data and tolerates one node failure. RF3 keeps three copies, tolerates two failures and needs at least five nodes.'],
+    ['Stargate and Curator', 'Stargate is the CVM service that handles data I/O. Curator runs background work such as re-protecting data after a failure and cleaning up space.'],
+    ['Prism Element', 'The management interface of one cluster. It runs on the CVMs and is reached through the cluster virtual IP.'],
+    ['Prism Central', 'A separate VM (or three for scale-out) that manages many clusters from one place and runs add-on services.'],
+    ['Foundation', 'The imaging tool that installs AHV and AOS on new nodes and creates the cluster. It uses the IPMI network to reach the nodes.'],
+    ['Life Cycle Manager (LCM)', 'Inventories and updates software and firmware across the cluster, one node at a time, from the Internet or a local dark site.']
+  ];
+  VIEWS.concepts = function () {
+    return head('Nutanix concepts', 'The building ideas behind the lab. Each concept maps to something you can click in the other views.') +
+      '<div class="cards">' + CONCEPTS.map((c) => `<div class="card"><div><b>${esc(c[0])}</b></div><div class="lbl" style="margin-top:4px;font-size:13px">${esc(c[1])}</div></div>`).join('') + '</div>';
+  };
+  const ADDONS = {
+    fvn: ['Flow Virtual Networking', 'Network virtualization for AHV: VPCs, overlay subnets and external networks managed from Prism Central.'],
+    fns: ['Flow Network Security', 'Microsegmentation for AHV VMs, with security policies built from Prism Central categories.'],
+    files: ['Nutanix Files', 'SMB and NFS file services delivered by file server VMs on the cluster.'],
+    objects: ['Nutanix Objects', 'S3-compatible object storage running on the cluster.'],
+    ndb: ['Nutanix Database Service', 'Database provisioning, cloning and lifecycle management.'],
+    nkp: ['Nutanix Kubernetes Platform', 'Kubernetes cluster deployment and management.'],
+    dr: ['Disaster recovery', 'Protection policies and recovery plans that replicate VMs to another cluster.']
   };
 
   VIEWS.failure = function () {
@@ -450,6 +481,7 @@
     const tol = ft();
     const names = (ids) => ids.map((id) => (node(id) || {}).name).join(', ');
 
+    if (!lab.nodes.length) { add('', 'No nodes yet', 'Add nodes to the lab to simulate failures.'); return out.join(''); }
     if (!domains.size && !fail.tors.size && !fail.disk) {
       add('', 'Healthy', `All ${lab.nodes.length} nodes, CVMs and both ToR switches are up. Data is protected at RF${lab.cluster.rf}.`);
       return out.join('');
@@ -504,7 +536,7 @@
         const n = node(id); if (!n) return null;
         return { kind: 'Node', title: n.name, obj: n, fields: [F('name', 'Host name'), F('serial', 'Serial number'), F('hostIp', 'AHV host IP'), F('cvmIp', 'CVM IP'), F('ipmiIp', 'IPMI IP'), F('torAPort', lab.network.layout === '2x2' ? 'TOR-A port (vs0)' : 'TOR-A port'), F('torBPort', lab.network.layout === '2x2' ? 'TOR-B port (vs0)' : 'TOR-B port')].concat(lab.network.layout === '2x2' ? [F('torAPort2', 'TOR-A port (vs1)'), F('torBPort2', 'TOR-B port (vs1)')] : []).concat([F('oobPort', 'OOB switch port')]),
           note: `Hardware for all nodes is set in the hardware profile (homogeneous cluster).`, extra: hostSummary(id),
-          del: lab.nodes.length > 3 ? () => removeNode(id) : null, delLabel: 'Remove node' };
+          del: () => removeNode(id), delLabel: 'Remove node' };
       }
       case 'switch': {
         const s = lab.switches.find((x) => x.id === id);
@@ -524,7 +556,8 @@
           note: 'Renaming the cluster also renames the storage pool, user container and management subnet when they start with the old cluster name.' };
       case 'pc':
         return { kind: 'Prism Central', title: lab.pc.name, obj: lab.pc, fields: [F('name', 'VM name'), F('deployment', 'Deployment', { opts: [['Single VM', 'Single VM'], ['Scale-out (3 VMs)', 'Scale-out (3 VMs)']] }), F('size', 'Size', { opts: [['Small', 'Small'], ['Large', 'Large'], ['X-Large', 'X-Large']] }), F('vcpu', 'vCPU', { num: 1 }), F('ramGB', 'Memory (GB)', { num: 1 }), F('ip', 'IP address'), F('fqdn', 'FQDN'), F('host', 'Runs on host', { opts: nodeOpts() })],
-          note: 'vCPU and memory are example values. Check the Prism Central sizing table for your pc release before deploying.' };
+          note: 'vCPU and memory are example values. Check the Prism Central sizing table for your pc release before deploying.',
+          del: () => { lab.pc.deployed = false; }, delLabel: 'Remove Prism Central' };
       case 'vm': {
         const v = lab.vms.find((x) => x.id === id); if (!v) return null;
         return { kind: 'Virtual machine', title: v.name, obj: v, fields: [F('name', 'Name'), F('os', 'Guest OS'), F('vcpu', 'vCPU', { num: 1 }), F('ramGB', 'Memory (GB)', { num: 1 }), F('diskGB', 'Disk (GB)', { num: 1 }), F('network', 'Network', { opts: netOpts() }), F('host', 'Host', { opts: nodeOpts() })],
@@ -622,8 +655,8 @@
       if (k === 'name') { const t = panel.querySelector('h3'); if (t) t.textContent = val; }
     };
     const del = $('#btnDel');
-    if (del) del.onclick = () => { ed.del(); sel = null; save(); render(); clearPanel(); };
-    $('#btnClose').onclick = () => { sel = null; clearPanel(); render(false); };
+    if (del) del.onclick = () => { ed.del(); sel = null; save(); render(false); backToList(); };
+    $('#btnClose').onclick = () => { sel = null; render(false); backToList(); };
     render(false);
   }
   function renameFromCluster(oldN, newN) {
@@ -632,6 +665,7 @@
     lab.storage.containers.forEach((c) => { if (!c.system) c.name = fix(c.name); });
     lab.network.vmNetworks.forEach((v) => { v.name = fix(v.name); });
   }
+  function backToList() { if (lastList) openList(lastList); else clearPanel(); }
   function clearPanel() {
     $('#panel').innerHTML = '<div class="panel-empty"><h3>Details</h3><p>Select a node, switch, VM, network, container or service in the diagram to see its settings here. Changes are saved in this browser automatically.</p></div>';
   }
@@ -641,22 +675,26 @@
   function bumpIp(ipStr, by) { const p = String(ipStr).split('.').map(Number); if (p.length !== 4 || p.some(isNaN)) return ''; p[3] = Math.min(254, p[3] + by); return p.join('.'); }
   function addNode() {
     if (lab.nodes.length >= 16) { toast('This lab supports up to 16 nodes'); return; }
-    const last = lab.nodes[lab.nodes.length - 1];
+    const last = lab.nodes[lab.nodes.length - 1] || { hostIp: '10.10.10.10', cvmIp: '10.10.10.30', ipmiIp: '10.10.11.10' };
     const id = nextId('n', lab.nodes);
     const num = lab.nodes.length + 1;
     lab.nodes.push({ id, name: 'NTX-N' + num, serial: 'EXAMPLE-SN-' + String(num).padStart(2, '0'), hostIp: bumpIp(last.hostIp, 1), cvmIp: bumpIp(last.cvmIp, 1), ipmiIp: bumpIp(last.ipmiIp, 1), torAPort: 'Eth1/' + num, torBPort: 'Eth1/' + num, oobPort: 'Gi1/0/' + num });
     normalize(lab);
+    if (lab.nodes.length === 1 && !lab.pc.host) lab.pc.host = id;
+    if (lab.nodes.length === 3 && !lab.storage.containers.length) { lab.storage.containers.push({ id: 'ctr-mgmt', name: 'NutanixManagementShare', system: true, rf: 2, compression: true, dedup: false, ecx: false }, { id: 'ctr-user', name: lab.cluster.name + '-CTR', system: false, rf: 2, compression: true, dedup: false, ecx: false }); toast('Cluster created: system container and ' + lab.cluster.name + '-CTR added'); }
     save(); render(); openEditor('node', id);
   }
   function removeNode(id) {
-    const target = lab.nodes.find((n) => n.id !== id);
+    const target = lab.nodes.find((n) => n.id !== id) || { id: '' };
     lab.nodes = lab.nodes.filter((n) => n.id !== id);
     lab.vms.forEach((v) => { if (v.host === id) v.host = target.id; });
     if (lab.pc.host === id) lab.pc.host = target.id;
+    if (!lab.nodes.length) lab.pc.deployed = false;
     if (Number(lab.cluster.rf) === 3 && lab.nodes.length < 5) lab.cluster.rf = 2;
     fail.nodes.delete(id); fail.cvms.delete(id);
   }
   function addVm() {
+    if (!lab.nodes.length) { toast('Add nodes before creating VMs'); return; }
     const id = 'vm-' + Date.now().toString(36);
     const load = lab.nodes.map((n) => ({ id: n.id, ram: hostUse(n.id).ramVm + hostUse(n.id).ramPc })).sort((a, b) => a.ram - b.ram);
     lab.vms.push({ id, name: 'NEW-VM-' + (lab.vms.length + 1), vcpu: 2, ramGB: 8, diskGB: 100, network: (lab.network.vmNetworks[0] || {}).id || '', host: load[0].id, os: 'Linux' });
@@ -668,16 +706,100 @@
     lab.network.vmNetworks.push({ id, name: 'VM-Net-' + vlan, vlan, subnet: `10.10.${vlan % 255}.0/24`, gateway: `10.10.${vlan % 255}.1`, vs: lab.network.layout === '2x2' ? 'vs1' : 'vs0' });
     save(); render(); openEditor('vmnet', id);
   }
+  function deployPc() {
+    if (lab.nodes.length < 3) { toast('Create a cluster of at least 3 nodes first'); return; }
+    lab.pc.deployed = true; if (!node(lab.pc.host)) lab.pc.host = lab.nodes[0].id;
+    save(); render(); openEditor('pc', 'pc');
+  }
+  function addMgmtSubnet() {
+    if (lab.network.vmNetworks.some((v) => v.mgmt)) { toast('A management VLAN subnet already exists'); return; }
+    lab.network.vmNetworks.unshift({ id: 'net-mgmt', name: lab.cluster.name + '-Mgmt', mgmt: true, subnet: lab.network.mgmtSubnet, gateway: lab.network.mgmtGateway, vs: 'vs0' });
+    save(); render(); openEditor('vmnet', 'net-mgmt');
+  }
   function addCtr() {
     const id = 'ctr-' + Date.now().toString(36);
     lab.storage.containers.push({ id, name: 'Container-' + (lab.storage.containers.length + 1), system: false, rf: Number(lab.cluster.rf), compression: true, dedup: false, ecx: false });
     save(); render(); openEditor('container', id);
   }
 
+  /* ---------- sidebar ---------- */
+  let menuSel = 'nodes';
+  let lastList = null;
+  function menu() {
+    const two = lab.network.layout === '2x2';
+    return [
+      { g: 'Start from', items: [{ id: 'empty', label: 'Empty lab', sub: 'Build a cluster from scratch', start: 1, act: 'empty' }] },
+      { g: 'Completed examples', items: Object.keys(window.NBL_PRESETS).map((k) => ({ id: 'preset-' + k, icon: '▸', label: window.NBL_PRESETS[k].short || window.NBL_PRESETS[k].label, act: 'preset:' + k })) },
+      { g: 'Learn', items: [{ id: 'concepts', icon: '?', label: 'Nutanix concepts', view: 'concepts' }] },
+      { g: 'Physical', items: [
+        { id: 'nodes', icon: '▤', label: 'Nodes', view: 'physical', list: 'nodes', count: lab.nodes.length },
+        { id: 'switches', icon: '⇄', label: 'Switches and cabling', view: 'physical', list: 'switches', count: lab.switches.length }] },
+      { g: 'Cluster', items: [
+        { id: 'cluster', icon: '◎', label: 'Cluster', view: 'management', edit: ['cluster', 'cluster'], count: lab.nodes.length >= 3 ? 1 : 0 },
+        { id: 'resources', icon: '▦', label: 'Compute and memory', view: 'resources' }] },
+      { g: 'Storage', items: [
+        { id: 'pool', icon: '▭', label: 'Storage pool', view: 'storage', edit: ['pool', 'pool'], count: lab.nodes.length ? 1 : 0 },
+        { id: 'containers', icon: '▣', label: 'Storage containers', view: 'storage', list: 'containers', count: lab.storage.containers.length }] },
+      { g: 'Networking', items: [
+        { id: 'vswitches', icon: '⌥', label: 'Virtual switches', view: 'network', list: 'vswitches', count: lab.nodes.length ? (two ? 2 : 1) : 0 },
+        { id: 'subnets', icon: '≡', label: 'Subnets', view: 'network', list: 'subnets', count: lab.network.vmNetworks.length }] },
+      { g: 'Management', items: [
+        { id: 'pc', icon: '◈', label: 'Prism Central', view: 'management', edit: pcUp() ? ['pc', 'pc'] : null, act2: pcUp() ? null : 'deployPc', count: pcUp() ? 1 : 0 },
+        { id: 'services', icon: '⚙', label: 'Infrastructure services', view: 'management', list: 'services', count: 7 }] },
+      { g: 'Workloads', items: [{ id: 'vms', icon: '▢', label: 'Virtual machines', view: 'vms', list: 'vms', count: lab.vms.length + (pcUp() ? 1 : 0) }] },
+      { g: 'Operations', items: [{ id: 'failure', icon: '⚠', label: 'Failure scenarios', view: 'failure' }] },
+      { g: 'Add-ons (coming soon)', items: Object.keys(ADDONS).map((k) => ({ id: 'addon-' + k, icon: '+', label: ADDONS[k][0], addon: k, soon: 1 })) }
+    ];
+  }
+  function renderSide() {
+    $('#side').innerHTML = menu().map((grp) => `<div class="sgroup"><div class="sglabel">${esc(grp.g)}</div>` + grp.items.map((it) => it.start
+      ? `<button class="sitem start${menuSel === it.id ? ' on' : ''}" data-menu="${it.id}"><b>${esc(it.label)}</b><small>${esc(it.sub)}</small></button>`
+      : `<button class="sitem${menuSel === it.id ? ' on' : ''}${it.soon ? ' soon' : ''}" data-menu="${it.id}"><span class="sicon">${it.icon}</span><span class="slabel">${esc(it.label)}</span>${it.count !== undefined ? `<span class="scount">${it.count}</span>` : ''}${it.soon ? '<span class="scount">soon</span>' : ''}</button>`).join('') + '</div>').join('');
+  }
+  function pickMenu(id) {
+    const it = [].concat(...menu().map((g) => g.items)).find((x) => x.id === id);
+    if (!it) return;
+    if (it.act) { runStart(it.act); return; }
+    menuSel = id; lastList = null;
+    if (it.view) view = it.view;
+    sel = null;
+    render(false);
+    if (it.edit) openEditor(it.edit[0], it.edit[1]);
+    else if (it.act2) { clearPanel(); $('#panel').innerHTML = '<div class="kind">Prism Central</div><h3>Not deployed</h3><p class="muted">Prism Central manages one or more clusters from one place. Deploy it once the cluster has at least 3 nodes.</p><div class="panel-actions"><button class="btn primary" data-act="deployPc">Deploy Prism Central</button></div>'; }
+    else if (it.list) openList(it.list);
+    else if (it.addon) { const a = ADDONS[it.addon]; $('#panel').innerHTML = `<div class="kind">Add-on (coming soon)</div><h3>${esc(a[0])}</h3><p>${esc(a[1])}</p><p class="muted">This add-on will get its own view and objects in a future release of the lab.</p>`; }
+    else clearPanel();
+  }
+  function runStart(act) {
+    const prev = JSON.stringify(lab);
+    lab = normalize(act === 'empty' ? window.NBL_EMPTY() : window.NBL_SAMPLE(act.split(':')[1]));
+    fail.nodes.clear(); fail.cvms.clear(); fail.tors.clear(); fail.disk = ''; sel = null;
+    menuSel = act === 'empty' ? 'nodes' : 'nodes'; view = 'physical';
+    save(); render(false);
+    if (act === 'empty') openList('nodes'); else clearPanel();
+    toast(act === 'empty' ? 'Empty lab: add nodes to begin' : 'Loaded: ' + lab.cluster.name + ', ' + lab.nodes.length + ' nodes, RF' + lab.cluster.rf, () => { lab = normalize(JSON.parse(prev)); save(); render(true); toast('Previous lab restored'); });
+  }
+  function openList(kind) {
+    lastList = kind;
+    const L = {
+      nodes: { t: 'Nodes', type: 'node', items: lab.nodes.map((n) => [n.id, n.name, n.hostIp]), add: 'addNode', addL: 'Add node', empty: 'No nodes yet. A standard cluster needs at least 3 nodes.' },
+      switches: { t: 'Switches', type: 'switch', items: lab.switches.map((x) => [x.id, x.name, x.role]) },
+      vswitches: { t: 'Virtual switches', type: 'netcfg', items: lab.nodes.length ? [['vs', String(lab.network.virtualSwitch), 'host and CVM traffic'], ['bond', 'br0-up bond', lab.network.bondMode]].concat(lab.network.layout === '2x2' ? [['vs1', String(lab.network.vmSwitch), 'VM traffic'], ['bond1', 'br1-up bond', lab.network.vmBondMode]] : []) : [], empty: 'Virtual switches are created with the cluster. Add nodes first.' },
+      subnets: { t: 'Subnets', type: 'vmnet', items: lab.network.vmNetworks.map((v) => [v.id, v.name, vlanText(v)]), add: 'addNet', addL: 'Add subnet', add2: lab.network.vmNetworks.some((v) => v.mgmt) ? null : 'addMgmtSubnet', add2L: 'Add management VLAN subnet', empty: 'No subnets yet.' },
+      containers: { t: 'Storage containers', type: 'container', items: lab.storage.containers.map((c) => [c.id, c.name, 'RF' + c.rf]), add: 'addCtr', addL: 'Add container' },
+      services: { t: 'Infrastructure services', type: 'service', items: [['dns', 'DNS', lab.services.dns.join(', ')], ['ntp', 'NTP', lab.services.ntp.join(', ')], ['directory', 'Directory', lab.services.directoryTarget], ['smtp', 'SMTP', lab.services.smtp], ['syslog', 'Syslog', lab.services.syslog], ['lcmSource', 'LCM source', lab.services.lcmSource], ['proxy', 'HTTP proxy', lab.services.proxy]] },
+      vms: { t: 'Virtual machines', type: 'vm', items: lab.vms.map((v) => [v.id, v.name, v.vcpu + ' vCPU / ' + v.ramGB + ' GB']), add: 'addVm', addL: 'Add VM', empty: 'No VMs yet.' }
+    }[kind];
+    let h = `<div class="kind">List</div><h3>${esc(L.t)} <span class="muted" style="font-weight:400">(${L.items.length})</span></h3>`;
+    h += L.items.length ? '<div class="olist">' + L.items.map((x) => `<button class="orow" data-type="${L.type}" data-id="${esc(x[0])}"><span>${esc(x[1])}</span><small>${esc(x[2] || '')}</small></button>`).join('') + '</div>' : `<p class="muted">${esc(L.empty || 'None')}</p>`;
+    if (L.add || L.add2) h += '<div class="panel-actions">' + (L.add ? `<button class="btn primary" data-act="${L.add}">${esc(L.addL)}</button>` : '') + (L.add2 ? `<button class="btn" data-act="${L.add2}">${esc(L.add2L)}</button>` : '') + '</div>';
+    $('#panel').innerHTML = h;
+  }
+
   /* ---------- render ---------- */
   function renderSummary() {
     const c = clusterNums();
-    $('#labTitle').textContent = `${lab.cluster.name}: ${c.n}-node ${lab.cluster.hypervisor} cluster, RF${lab.cluster.rf}. Click any object to view or edit it.`;
+    $('#labTitle').textContent = c.n ? `${lab.cluster.name}: ${c.n}-node ${lab.cluster.hypervisor} cluster, RF${lab.cluster.rf}.${c.n < 3 ? ' A standard cluster needs at least 3 nodes.' : ''} Click any object to view or edit it.` : 'Empty lab: start by adding nodes from the menu.';
     $('#summary').innerHTML = [
       ['cluster', 'cluster', 'Cluster', lab.cluster.name],
       ['cluster', 'cluster', 'VIP', lab.cluster.vip],
@@ -686,14 +808,14 @@
       ['hardware', 'hw', 'Memory', fmt(c.ramTotal / 1024, 2) + ' TB'],
       ['pool', 'pool', 'Raw', fmt(c.raw) + ' TB'],
       ['pool', 'pool', 'Usable est.', fmt(c.usable) + ' TB'],
-      ['pc', 'pc', 'Prism Central', lab.pc.ip],
+      ['pc', 'pc', 'Prism Central', pcUp() ? lab.pc.ip : 'not deployed'],
       [null, null, 'VMs', lab.vms.length]
     ].map((x) => `<span class="chip"${x[0] ? ` data-type="${x[0]}" data-id="${x[1]}"` : ''}>${esc(x[2])}: <b>${esc(x[3])}</b></span>`).join('');
   }
   function render(resetPanel) {
     renderSummary();
     $('#canvas').innerHTML = VIEWS[view]();
-    document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
+    renderSide();
     if (resetPanel) clearPanel();
   }
 
@@ -701,7 +823,7 @@
   function onPick(e) {
     const act = e.target.closest('[data-act]');
     if (act) {
-      ({ addNode, addVm, addNet, addCtr, clearFail: () => { fail.nodes.clear(); fail.cvms.clear(); fail.tors.clear(); fail.disk = ''; render(false); } })[act.dataset.act]();
+      ({ addNode, addVm, addNet, addCtr, deployPc, addMgmtSubnet, clearFail: () => { fail.nodes.clear(); fail.cvms.clear(); fail.tors.clear(); fail.disk = ''; render(false); } })[act.dataset.act]();
       return;
     }
     if (e.target.closest('[data-fail]')) return;
@@ -711,7 +833,8 @@
   document.addEventListener('DOMContentLoaded', () => {
     try { document.documentElement.dataset.theme = localStorage.getItem(THEME) || 'light'; } catch (e) { /* ignore */ }
     load();
-    $('#tabs').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; view = b.dataset.view; render(false); };
+    $('#side').onclick = (e) => { const b = e.target.closest('[data-menu]'); if (b) pickMenu(b.dataset.menu); };
+    $('#panel').addEventListener('click', (e) => { const a = e.target.closest('[data-act]'); if (a) { onPick(e); return; } const r = e.target.closest('.orow'); if (r) openEditor(r.dataset.type, r.dataset.id); });
     $('#canvas').addEventListener('click', onPick);
     $('#summary').addEventListener('click', onPick);
     $('#canvas').addEventListener('change', (e) => {
@@ -722,17 +845,6 @@
       render(false);
     });
     $('#btnTheme').onclick = () => { const d = document.documentElement; d.dataset.theme = d.dataset.theme === 'dark' ? 'light' : 'dark'; try { localStorage.setItem(THEME, d.dataset.theme); } catch (e) { /* ignore */ } };
-    const ps = $('#presetSel');
-    const syncPreset = () => { ps.innerHTML = '<option value="">Load a sample lab...</option>' + Object.keys(window.NBL_PRESETS).map((k) => `<option value="${k}">${esc(window.NBL_PRESETS[k].label)}</option>`).join(''); ps.value = ''; };
-    syncPreset();
-    ps.onchange = () => {
-      if (!ps.value) return;
-      const prev = JSON.stringify(lab);
-      lab = normalize(window.NBL_SAMPLE(ps.value));
-      fail.nodes.clear(); fail.cvms.clear(); fail.tors.clear(); fail.disk = ''; sel = null;
-      save(); render(true); syncPreset();
-      toast('Loaded: ' + lab.cluster.name + ', ' + lab.nodes.length + ' nodes, RF' + lab.cluster.rf, () => { lab = normalize(JSON.parse(prev)); save(); render(true); toast('Previous lab restored'); });
-    };
     $('#btnExport').onclick = () => {
       const blob = new Blob([JSON.stringify(lab, null, 2)], { type: 'application/json' });
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = (lab.cluster.name || 'nutanix-lab') + '.json'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);

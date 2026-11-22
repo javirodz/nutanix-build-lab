@@ -18,10 +18,13 @@ Inspired by the NSX Build Lab at vconfig.pl.
 
 ## Using it
 
+- The left menu works like the NSX Build Lab: start from an **Empty lab** or a **Completed example**, then pick an object type (nodes, switches, cluster, storage, networking, management, VMs) to open its view and list its objects in the side panel. The counts show how many of each exist.
+- **Add-ons** (Flow Virtual Networking, Flow Network Security, Files, Objects, NDB, NKP, disaster recovery) are listed as coming soon.
+
 - Click any object to open its settings in the side panel. Changes save to the browser automatically.
 - **Share link** copies a URL that contains the full lab, so someone else opens the same design.
 - **Export / Import** saves or loads the lab as JSON.
-- **Load a sample lab** (dropdown) replaces the current lab with the chosen sample. Use **Undo** in the message that appears to go back.
+- Starting from an empty lab or an example replaces the current lab. Use **Undo** in the message that appears to go back.
 - **Theme** switches between light and dark.
 
 ## Hosting on Cloudflare

@@ -21,22 +21,16 @@
     <button id="btnShare" title="Copy a link that contains this lab">Share link</button>
     <button id="btnExport" title="Download this lab as JSON">Export</button>
     <button id="btnImport" title="Load a lab from JSON">Import</button>
-    <select id="presetSel" title="Replace the current lab with a sample lab"></select>
     <button id="btnTheme" title="Switch light and dark theme">Theme</button>
     <input type="file" id="fileImport" accept="application/json" hidden>
   </div>
 </header>
 
-<nav class="tabs" id="tabs">
-  <button data-view="physical" class="active">Physical</button>
-  <button data-view="network">Network</button>
-  <button data-view="storage">Storage</button>
-  <button data-view="resources">Resources</button>
-  <button data-view="vms">VMs</button>
-  <button data-view="management">Management</button>
-  <button data-view="failure">Failure scenarios</button>
-</nav>
 
+
+<div class="shell">
+<aside class="side" id="side"></aside>
+<div class="mainwrap">
 <div class="summary" id="summary"></div>
 
 <main class="layout">
@@ -54,6 +48,8 @@
   <p>Independent community lab. Not affiliated with or endorsed by Nutanix, Inc. Nutanix, AHV, AOS, Prism and related marks are trademarks of Nutanix, Inc.</p>
   <p>All values are examples for learning. Validate real designs with Nutanix Sizer and the official Nutanix documentation for your AOS and Prism Central release.</p>
 </footer>
+</div>
+</div>
 
 <div class="toast" id="toast"></div>
 <script src="js/sample.js"></script>

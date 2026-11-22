@@ -59,7 +59,7 @@
         { id: 'oob', name: 'OOB-SW', role: 'Out-of-band (IPMI)', model: '1GbE access switch (example)', mgmtIp: '10.10.11.4' }
       ],
       nodes: makeNodes(opts.nodes, twoByTwo),
-      pc: { name: 'PC-01', deployment: 'Single VM', size: 'Small', vcpu: 6, ramGB: 28, ip: '10.10.10.60', fqdn: 'pc01.lab.example', host: 'n1' },
+      pc: { deployed: true, name: 'PC-01', deployment: 'Single VM', size: 'Small', vcpu: 6, ramGB: 28, ip: '10.10.10.60', fqdn: 'pc01.lab.example', host: 'n1' },
       services: {
         dns: ['10.10.5.10', '10.10.5.11'],
         ntp: ['0.pool.ntp.org', '1.pool.ntp.org', '2.pool.ntp.org'],
@@ -94,11 +94,11 @@
 
   const PRESETS = {
     'six-rf2': {
-      label: '6 nodes, RF2, 2x25GbE (one bond)',
+      label: '6 nodes, RF2, 2x25GbE (one bond)', short: '6 nodes, RF2, one bond',
       build: () => base({ preset: 'six-rf2', name: 'NTX-LAB-01', nodes: 6, rf: 2, layout: '1x2', vms: sixVms.map((v) => Object.assign({}, v)) })
     },
     'three-rf2': {
-      label: '3 nodes, RF2, 2x25GbE (one bond)',
+      label: '3 nodes, RF2, 2x25GbE (one bond)', short: '3 nodes, RF2, one bond',
       build: () => base({ preset: 'three-rf2', name: 'NTX-LAB-03', nodes: 3, rf: 2, layout: '1x2', cores: 16, ramGB: 512, disks: 4, vms: [
         vm('WEB-01', 4, 16, 100, 'net-dmz', 'n1', 'Linux'),
         vm('APP-01', 8, 32, 200, 'net-prod', 'n2', 'Windows'),
@@ -108,11 +108,18 @@
       ] })
     },
     'six-rf3-2x2': {
-      label: '6 nodes, RF3, 4x25GbE (two bonds: vs0 + vs1)',
+      label: '6 nodes, RF3, 4x25GbE (two bonds: vs0 + vs1)', short: '6 nodes, RF3, two bonds',
       build: () => base({ preset: 'six-rf3-2x2', name: 'NTX-LAB-02', nodes: 6, rf: 3, layout: '2x2', vms: sixVms.map((v) => Object.assign({}, v)) })
     }
   };
 
   window.NBL_PRESETS = PRESETS;
+  window.NBL_EMPTY = () => {
+    const l = base({ preset: 'empty', name: 'NTX-LAB', nodes: 0, rf: 2, layout: '1x2', vms: [] });
+    l.pc.deployed = false; l.pc.host = '';
+    l.network.vmNetworks = [];
+    l.storage.containers = [];
+    return l;
+  };
   window.NBL_SAMPLE = (id) => (PRESETS[id] || PRESETS['six-rf2']).build();
 })();
