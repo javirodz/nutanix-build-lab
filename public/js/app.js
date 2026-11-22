@@ -98,6 +98,14 @@
   const isSel = (type, id) => sel && sel.type === type && sel.id === id;
   const G = (type, id, inner) => `<g class="obj${isSel(type, id) ? ' sel' : ''}" data-type="${type}" data-id="${esc(id)}">${inner}</g>`;
   const defs = `<defs><marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor" style="fill:var(--vm)"/></marker></defs>`;
+  // lane order that keeps orthogonal cables from crossing: cables are {tx: x at top end, bx: x at bottom end}
+  const laneOrder = (cables) => {
+    const idx = cables.map((c, i) => i);
+    const left = idx.filter((i) => cables[i].bx < cables[i].tx).sort((a, b) => cables[a].tx - cables[b].tx);
+    const right = idx.filter((i) => cables[i].bx >= cables[i].tx).sort((a, b) => cables[b].tx - cables[a].tx);
+    const lanes = []; left.concat(right).forEach((i, k) => { lanes[i] = k; });
+    return lanes;
+  };
   const head = (title, text, actions = '') => `<div class="view-head"><div><h2>${esc(title)}</h2><p>${text}</p></div><div>${actions}</div></div>`;
 
   /* ---------- views ---------- */
@@ -159,47 +167,86 @@
   VIEWS.network = function () {
     const two = lab.network.layout === '2x2';
     const n = lab.nodes.length, cw = two ? 270 : 200, gap = two ? 16 : 18;
-    const W = Math.max(1000, n * (cw + gap) + 40);
     const hx = (i) => 20 + i * (cw + gap);
-    const HY = 250, HH = 312;
-    const torA = { x: W * 0.22 - 90, y: 100 }, torB = { x: W * 0.55 - 90, y: 100 }, oob = { x: W - 220, y: 100 };
+    const HH = 312;
     const vs0 = String(lab.network.virtualSwitch).split(' ')[0];
     const vs1 = String(lab.network.vmSwitch || 'vs1').split(' ')[0];
-    let s = `<svg class="diagram" viewBox="0 0 ${W} ${HY + HH + 110}" style="min-width:${Math.round(W * 0.72)}px">`;
-    s += R(W * 0.385 - 110, 14, 220, 40, 'svc') + T(W * 0.385, 32, 'Upstream / core network', 't-title', 'middle') + T(W * 0.385, 47, 'Routed gateways for all VLANs', 't-muted', 'middle');
-    s += C(W * 0.385 - 40, 54, torA.x + 90, torA.y, 'wire') + C(W * 0.385 + 40, 54, torB.x + 90, torB.y, 'wire');
-    s += L(torA.x + 180, torA.y + 25, torB.x, torB.y + 25, 'peer') + T((torA.x + 180 + torB.x) / 2, torA.y + 18, 'MLAG / vPC peer link', 't-muted', 'middle');
-    const swBox = (sw, p) => {
-      const down = fail.tors.has(sw.id);
-      return G('switch', sw.id, R(p.x, p.y, 180, 50, 'sw' + (down ? ' down' : '')) + T(p.x + 90, p.y + 21, sw.name, 't-title', 'middle') + T(p.x + 90, p.y + 38, sw.role, 't-muted', 'middle'));
-    };
-    s += swBox(lab.switches[0], torA) + swBox(lab.switches[1], torB) + swBox(lab.switches[2], oob);
-
-    // port positions relative to host x: [label, offset, side]
+    // host port positions relative to host x: [label, offset, switch, node field]
     const ports = two
-      ? [['A1', 8, 'A'], ['B1', 56, 'B'], ['A2', 112, 'A'], ['B2', 160, 'B']]
-      : [['25G-A', 14, 'A'], ['25G-B', 74, 'B']];
+      ? [['A1', 8, 'torA', 'torAPort'], ['B1', 56, 'torB', 'torBPort'], ['A2', 112, 'torA', 'torAPort2'], ['B2', 160, 'torB', 'torBPort2']]
+      : [['25G-A', 14, 'torA', 'torAPort'], ['25G-B', 74, 'torB', 'torBPort']];
     const pw = two ? 44 : 50;
     const bmcX = cw - (two ? 54 : 58);
 
-    lab.nodes.forEach((nd, i) => {
-      const x = hx(i), y = HY, dn = fail.nodes.has(nd.id);
-      ports.forEach((p) => {
-        const sw = p[2] === 'A' ? torA : torB;
-        const isDown = fail.tors.has(p[2] === 'A' ? 'torA' : 'torB') || dn;
-        s += C(sw.x + 90, sw.y + 50, x + p[1] + pw / 2, y - 12, isDown ? 'wire-down' : (p[2] === 'A' ? 'wire-a' : 'wire-b'));
+    // switch geometry: one labeled port per cable, in host order
+    const SPW = 52, SPG = 6;
+    const torPorts = { torA: [], torB: [] };
+    lab.nodes.forEach((nd, i) => ports.forEach((p) => torPorts[p[2]].push({ i, nd, p })));
+    const swW = (k) => Math.max(200, k * (SPW + SPG) + 24);
+    const wA = swW(torPorts.torA.length), wB = swW(torPorts.torB.length), wO = swW(n);
+    const hostsSpan = Math.max(0, n * (cw + gap) - gap);
+    const pairW = wA + 90 + wB;
+    const x0 = 20 + Math.max(0, (hostsSpan - pairW) / 2);
+    const W = Math.max(1000, hostsSpan + 40, x0 + pairW + 20, 20 + wO + 20);
+    const SY = 84, SH = 56;
+    const torA = { x: x0, y: SY, w: wA }, torB = { x: x0 + wA + 90, y: SY, w: wB };
+    const portX = (sw, k) => sw.x + 12 + k * (SPW + SPG);
+
+    // channels: each cable gets its own horizontal lane so no two cables overlap
+    const step = 6;
+    const topCables = n * ports.length;
+    const bandTop = SY + SH + 26;
+    const HY = bandTop + topCables * step + 34;
+    const oobY = HY + HH + 26 + n * step + 26;
+    const oob = { x: 20 + Math.max(0, (hostsSpan - wO) / 2), y: oobY, w: wO };
+    const H = oobY + SH + 30;
+    const O = (x1, y1, x2, y2, ym, cls) => `<path d="M${x1} ${y1} V${ym} H${x2} V${y2}" class="${cls}"/>`;
+    const portLbl = (v) => String(v || '').replace(/^Ethernet/i, 'Eth').replace(/^GigabitEthernet/i, 'Gi');
+
+    let s = `<svg class="diagram" viewBox="0 0 ${W} ${H + 120}" style="min-width:${Math.round(W * 0.72)}px">`;
+    const coreX = x0 + pairW / 2;
+    s += R(coreX - 110, 12, 220, 40, 'svc') + T(coreX, 30, 'Upstream / core network', 't-title', 'middle') + T(coreX, 45, 'Routed gateways for all VLANs', 't-muted', 'middle');
+    s += O(coreX - 40, 52, torA.x + wA / 2, SY, 68, 'wire') + O(coreX + 40, 52, torB.x + wB / 2, SY, 68, 'wire');
+    s += L(torA.x + wA, SY + 20, torB.x, SY + 20, 'peer') + T(torA.x + wA + 45, SY + 12, 'MLAG / vPC', 't-muted', 'middle');
+
+    const swBox = (sw, g, list, portsOnTop) => {
+      const down = fail.tors.has(sw.id);
+      let h = R(g.x, g.y, g.w, SH, 'sw' + (down ? ' down' : '')) + T(g.x + 10, g.y + (portsOnTop ? SH - 10 : 18), sw.name, 't-title') + T(g.x + g.w - 10, g.y + (portsOnTop ? SH - 10 : 18), sw.role, 't-muted', 'end');
+      list.forEach((c, k) => {
+        const px = portX(g, k), py = portsOnTop ? g.y - 8 : g.y + SH - 22;
+        h += `<rect x="${px}" y="${py}" width="${SPW}" height="22" rx="3" class="port"/>` + T(px + SPW / 2, py + 15, portLbl(c.label), 't-mono', 'middle').replace('class="', 'style="font-size:9.5px" class="');
       });
-      s += C(oob.x + 90, oob.y + 50, x + bmcX + 22, y - 12, 'wire-ipmi');
+      return G('switch', sw.id, h);
+    };
+    const swA = lab.switches.find((x) => x.id === 'torA'), swB = lab.switches.find((x) => x.id === 'torB'), swO = lab.switches.find((x) => x.id === 'oob');
+    s += swBox(swA, torA, torPorts.torA.map((c) => ({ label: c.nd[c.p[3]] })), false);
+    s += swBox(swB, torB, torPorts.torB.map((c) => ({ label: c.nd[c.p[3]] })), false);
+    s += swBox(swO, oob, lab.nodes.map((nd) => ({ label: nd.oobPort })), true);
+
+    // data cables (up to the ToRs)
+    const top = [];
+    ['torA', 'torB'].forEach((sid) => {
+      const g = sid === 'torA' ? torA : torB;
+      torPorts[sid].forEach((c, k) => top.push({ tx: portX(g, k) + SPW / 2, bx: hx(c.i) + c.p[1] + pw / 2, sid, c }));
     });
+    const tl = laneOrder(top);
+    top.forEach((t, i) => {
+      const isDown = fail.tors.has(t.sid) || fail.nodes.has(t.c.nd.id);
+      s += O(t.tx, SY + SH, t.bx, HY - 12, bandTop + tl[i] * step, isDown ? 'wire-down' : (t.sid === 'torA' ? 'wire-a' : 'wire-b'));
+    });
+    // BMC cables (down to the OOB switch)
+    const bot = lab.nodes.map((nd, i) => ({ tx: hx(i) + bmcX + 22, bx: portX(oob, i) + SPW / 2 }));
+    const bl = laneOrder(bot);
+    bot.forEach((b, i) => { s += O(b.tx, HY + HH + 11, b.bx, oobY - 8, HY + HH + 26 + bl[i] * step, 'wire-ipmi'); });
 
     lab.nodes.forEach((nd, i) => {
       const x = hx(i), y = HY;
       const down = fail.nodes.has(nd.id), cvmDown = fail.cvms.has(nd.id);
       const vms = vmsOn(nd.id).length + (pcOn(nd.id) ? 1 : 0);
-      let h = G('node', nd.id, R(x, y, cw, HH, 'host' + (down ? ' down' : '')) + T(x + 10, y + HH - 12, nd.name, 't-title') + T(x + cw - 10, y + HH - 12, 'AHV', 't-muted', 'end'));
+      let h = G('node', nd.id, R(x, y, cw, HH, 'host' + (down ? ' down' : '')) + T(x + 10, y + HH - 12, nd.name, 't-title'));
       ports.forEach((p) => { h += R(x + p[1], y - 12, pw, 22, 'port', 4) + T(x + p[1] + pw / 2, y + 3, p[0], 't-small', 'middle'); });
-      h += R(x + bmcX, y - 12, 44, 22, 'ipmi', 4) + T(x + bmcX + 22, y + 3, 'BMC', 't-small', 'middle');
-      h += T(x + bmcX + 22, y + 26, nd.ipmiIp, 't-mono t-muted', 'middle').replace('class="', 'style="font-size:9px" class="');
+      h += R(x + bmcX, y + HH - 11, 44, 22, 'ipmi', 4) + T(x + bmcX + 22, y + HH + 4, 'BMC', 't-small', 'middle');
+      h += T(x + cw - 8, y + HH - 16, 'BMC ' + nd.ipmiIp, 't-mono t-muted', 'end').replace('class="', 'style="font-size:9px" class="');
       const cvmBox = (cx, w) => G('cvm', nd.id, R(cx, y + 158, w, 74, 'cvm' + (cvmDown || down ? ' down' : '')) + T(cx + w / 2, y + 176, 'CVM', 't-title', 'middle') + T(cx + 6, y + 194, 'eth0', 't-muted t-small') + T(cx + 6, y + 207, nd.cvmIp, 't-mono') + T(cx + 6, y + 224, 'eth1 192.168.5.2', 't-small'));
       const uvmBox = (cx, w) => G('vmsof', nd.id, R(cx, y + 158, w, 74, 'uvm' + (down ? ' down' : '')) + T(cx + w / 2, y + 184, 'User VMs', 't-small t-title', 'middle') + T(cx + w / 2, y + 206, vms, 't-title', 'middle').replace('t-title', 't-title" style="font-size:20px') + T(cx + w / 2, y + 224, 'on this host', 't-muted', 'middle'));
       if (two) {
@@ -229,7 +276,7 @@
       s += h;
     });
 
-    const ly = HY + HH + 34;
+    const ly = H + 20;
     s += T(20, ly, 'Networks (click to edit)', 't-title');
     const chips = [
       { type: 'netcfg', id: 'mgmt', label: `Mgmt VLAN ${lab.network.mgmtVlan}  ${lab.network.mgmtSubnet}  (${lab.network.mgmtTagging})${two ? '  on ' + vs0 : ''}`, cls: 'br' },
@@ -463,8 +510,11 @@
     lab.nodes.forEach((nd, i) => {
       const x = 20 + i * (cw + gap);
       const dn = fail.nodes.has(nd.id);
-      s += C(sx[0] + 70, 50, x + 40, 110, fail.tors.has('torA') || dn ? 'wire-down' : 'wire-a');
-      s += C(sx[1] + 70, 50, x + cw - 40, 110, fail.tors.has('torB') || dn ? 'wire-down' : 'wire-b');
+      const ca = { tx: sx[0] + 20 + i * (100 / Math.max(1, n)), bx: x + 40 }, cb = { tx: sx[1] + 20 + i * (100 / Math.max(1, n)), bx: x + cw - 40 };
+      const la = laneOrder(lab.nodes.map((q, j) => ({ tx: sx[0] + 20 + j * (100 / Math.max(1, n)), bx: 20 + j * (cw + gap) + 40 })))[i];
+      const lb = laneOrder(lab.nodes.map((q, j) => ({ tx: sx[1] + 20 + j * (100 / Math.max(1, n)), bx: 20 + j * (cw + gap) + cw - 40 })))[i];
+      s += `<path d="M${ca.tx} 50 V${60 + la * 4} H${ca.bx} V110" class="${fail.tors.has('torA') || dn ? 'wire-down' : 'wire-a'}"/>`;
+      s += `<path d="M${cb.tx} 50 V${60 + (n + lb) * 4} H${cb.bx} V110" class="${fail.tors.has('torB') || dn ? 'wire-down' : 'wire-b'}"/>`;
       s += G('node', nd.id, R(x, 110, cw, 76, 'host' + (dn ? ' down' : '')) + T(x + cw / 2, 130, nd.name, 't-title', 'middle') + R(x + 10, 140, cw - 20, 22, 'cvm' + (dn || fail.cvms.has(nd.id) ? ' down' : ''), 4) + T(x + cw / 2, 155, 'CVM', 't-small', 'middle') + T(x + cw / 2, 180, dn ? 'DOWN' : plural(vmsOn(nd.id).length + (pcOn(nd.id) ? 1 : 0), 'VM'), dn ? 't-small' : 't-muted', 'middle'));
     });
     s += '</svg>';
