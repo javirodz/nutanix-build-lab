@@ -1,6 +1,6 @@
 # Nutanix Build Lab
 
-An interactive, browser-based lab that shows what a Nutanix cluster looks like from different points of view. The first lab is a 6-node AHV cluster at RF2 on generic NX-style nodes. Every object in the diagrams can be clicked to view or edit it, and the lab can be shared as a link or exported as JSON.
+An interactive, browser-based lab that shows what a Nutanix cluster looks like from different points of view. Three sample labs are included: 6 nodes at RF2 with one bond, 3 nodes at RF2, and 6 nodes at RF3 with four uplinks in two bonds (vs0 for host and CVM traffic, vs1 for VM traffic). All use AHV on generic NX-style nodes. Every object in the diagrams can be clicked to view or edit it, and the lab can be shared as a link or exported as JSON.
 
 Inspired by the NSX Build Lab at vconfig.pl.
 
@@ -21,7 +21,7 @@ Inspired by the NSX Build Lab at vconfig.pl.
 - Click any object to open its settings in the side panel. Changes save to the browser automatically.
 - **Share link** copies a URL that contains the full lab, so someone else opens the same design.
 - **Export / Import** saves or loads the lab as JSON.
-- **Reset sample** restores the 6-node sample (click twice to confirm).
+- **Load preset** replaces the current lab with the selected sample (click twice to confirm).
 - **Theme** switches between light and dark.
 
 ## Hosting on Cloudflare Pages
@@ -39,7 +39,7 @@ To run it locally, open `index.html` in a browser, or serve the folder with any 
 ```
 index.html        page shell, toolbar and tabs
 css/style.css     light and dark theme, layout
-js/sample.js      the sample 6-node lab (all values are examples)
+js/sample.js      the sample lab presets (all values are examples)
 js/app.js         views, editor panel, calculations, share/export
 ```
 

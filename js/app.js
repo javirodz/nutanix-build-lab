@@ -19,7 +19,7 @@
     const h = location.hash.match(/lab=([^&]+)/);
     if (h) {
       try {
-        lab = JSON.parse(decodeURIComponent(escape(atob(h[1]))));
+        lab = normalize(JSON.parse(decodeURIComponent(escape(atob(h[1])))));
         history.replaceState(null, '', location.pathname);
         save();
         toast('Lab loaded from shared link');
@@ -28,6 +28,18 @@
     }
     try { lab = JSON.parse(localStorage.getItem(STORE)); } catch (e) { lab = null; }
     if (!valid(lab)) lab = window.NBL_SAMPLE();
+    normalize(lab);
+  }
+  function normalize(l) {
+    const nw = l.network;
+    if (!nw.layout) nw.layout = '1x2';
+    if (!nw.vmSwitch) nw.vmSwitch = 'vs1 (br1)';
+    if (!nw.vmBondMode) nw.vmBondMode = 'balance-slb';
+    nw.vmNetworks.forEach((v) => { if (!v.vs) v.vs = nw.layout === '2x2' ? 'vs1' : 'vs0'; if (nw.layout === '1x2') v.vs = 'vs0'; });
+    l.nodes.forEach((n, i) => { if (nw.layout === '2x2') { if (!n.torAPort2) n.torAPort2 = 'Eth1/' + (i + 17); if (!n.torBPort2) n.torBPort2 = 'Eth1/' + (i + 17); } });
+    if (nw.layout === '2x2' && /^2x 25GbE/.test(l.hardware.dataNics)) l.hardware.dataNics = '4x 25GbE SFP28 (2 dual-port cards)';
+    if (nw.layout === '1x2' && /^4x 25GbE/.test(l.hardware.dataNics)) l.hardware.dataNics = '2x 25GbE SFP28';
+    return l;
   }
   function valid(l) { return l && l.schema === 1 && Array.isArray(l.nodes) && l.cluster && l.hardware; }
   function save() { try { localStorage.setItem(STORE, JSON.stringify(lab)); } catch (e) { /* storage may be blocked */ } }
@@ -113,9 +125,10 @@
     s += T(x0 + rw / 2, top + units * U + 24, '42U rack, front view (example layout)', 't-muted', 'middle');
     s += '</svg>';
 
-    let t = '<table class="grid"><thead><tr><th>Node</th><th>TOR-A</th><th>TOR-B</th><th>OOB</th><th>AHV host</th><th>CVM</th><th>IPMI</th></tr></thead><tbody>';
+    const two = lab.network.layout === '2x2';
+    let t = `<table class="grid"><thead><tr><th>Node</th><th>TOR-A${two ? ' (vs0 / vs1)' : ''}</th><th>TOR-B${two ? ' (vs0 / vs1)' : ''}</th><th>OOB</th><th>AHV host</th><th>CVM</th><th>IPMI</th></tr></thead><tbody>`;
     lab.nodes.forEach((n) => {
-      t += `<tr class="click${isSel('node', n.id) ? ' sel' : ''}" data-type="node" data-id="${esc(n.id)}"><td><b>${esc(n.name)}</b></td><td class="mono">${esc(n.torAPort)}</td><td class="mono">${esc(n.torBPort)}</td><td class="mono">${esc(n.oobPort)}</td><td class="mono">${esc(n.hostIp)}</td><td class="mono">${esc(n.cvmIp)}</td><td class="mono">${esc(n.ipmiIp)}</td></tr>`;
+      t += `<tr class="click${isSel('node', n.id) ? ' sel' : ''}" data-type="node" data-id="${esc(n.id)}"><td><b>${esc(n.name)}</b></td><td class="mono">${esc(n.torAPort)}${two ? ' / ' + esc(n.torAPort2 || '') : ''}</td><td class="mono">${esc(n.torBPort)}${two ? ' / ' + esc(n.torBPort2 || '') : ''}</td><td class="mono">${esc(n.oobPort)}</td><td class="mono">${esc(n.hostIp)}</td><td class="mono">${esc(n.cvmIp)}</td><td class="mono">${esc(n.ipmiIp)}</td></tr>`;
     });
     t += '</tbody></table>';
 
@@ -128,18 +141,20 @@
       <div class="card obj" data-type="hardware" data-id="hw"><div class="lbl">NICs per node</div><div><b>${esc(hw.dataNics)}</b></div><div class="lbl">${esc(hw.bmc)}</div></div>
     </div>`;
 
-    return head('Physical view', `${lab.nodes.length} single-node 1U appliances, two data top-of-rack switches and one out-of-band switch for IPMI. Each node has one data uplink to each ToR and one BMC link to the OOB switch.`, '<button class="btn" data-act="addNode">Add node</button>') +
+    return head('Physical view', `${lab.nodes.length} single-node 1U appliances, two data top-of-rack switches and one out-of-band switch for IPMI. ${lab.network.layout === '2x2' ? 'Each node has two data uplinks to each ToR (one per bond)' : 'Each node has one data uplink to each ToR'} and one BMC link to the OOB switch.`, '<button class="btn" data-act="addNode">Add node</button>') +
       `<div class="two"><div>${s}</div><div><h3 style="margin:0">Cabling and addressing</h3><p class="muted" style="margin:2px 0 0">Click a row to edit the node, its ports and IP addresses.</p>${t}${cards}</div></div>`;
   };
 
   VIEWS.network = function () {
-    const n = lab.nodes.length, cw = 200, gap = 18;
+    const two = lab.network.layout === '2x2';
+    const n = lab.nodes.length, cw = two ? 270 : 200, gap = two ? 16 : 18;
     const W = Math.max(1000, n * (cw + gap) + 40);
     const hx = (i) => 20 + i * (cw + gap);
     const HY = 250, HH = 312;
     const torA = { x: W * 0.22 - 90, y: 100 }, torB = { x: W * 0.55 - 90, y: 100 }, oob = { x: W - 220, y: 100 };
+    const vs0 = String(lab.network.virtualSwitch).split(' ')[0];
+    const vs1 = String(lab.network.vmSwitch || 'vs1').split(' ')[0];
     let s = `<svg class="diagram" viewBox="0 0 ${W} ${HY + HH + 110}">`;
-    // core
     s += R(W * 0.385 - 110, 14, 220, 40, 'svc') + T(W * 0.385, 32, 'Upstream / core network', 't-title', 'middle') + T(W * 0.385, 47, 'Routed gateways for all VLANs', 't-muted', 'middle');
     s += C(W * 0.385 - 40, 54, torA.x + 90, torA.y, 'wire') + C(W * 0.385 + 40, 54, torB.x + 90, torB.y, 'wire');
     s += L(torA.x + 180, torA.y + 25, torB.x, torB.y + 25, 'peer') + T((torA.x + 180 + torB.x) / 2, torA.y + 18, 'MLAG / vPC peer link', 't-muted', 'middle');
@@ -149,12 +164,21 @@
     };
     s += swBox(lab.switches[0], torA) + swBox(lab.switches[1], torB) + swBox(lab.switches[2], oob);
 
+    // port positions relative to host x: [label, offset, side]
+    const ports = two
+      ? [['A1', 8, 'A'], ['B1', 56, 'B'], ['A2', 112, 'A'], ['B2', 160, 'B']]
+      : [['25G-A', 14, 'A'], ['25G-B', 74, 'B']];
+    const pw = two ? 44 : 50;
+    const bmcX = cw - (two ? 54 : 58);
+
     lab.nodes.forEach((nd, i) => {
-      const x = hx(i), y = HY;
-      const pA = { x: x + 14, y: y - 12 }, pB = { x: x + 74, y: y - 12 }, pI = { x: x + cw - 58, y: y - 12 };
-      s += C(torA.x + 90, torA.y + 50, pA.x + 25, pA.y, fail.tors.has('torA') || fail.nodes.has(nd.id) ? 'wire-down' : 'wire-a');
-      s += C(torB.x + 90, torB.y + 50, pB.x + 25, pB.y, fail.tors.has('torB') || fail.nodes.has(nd.id) ? 'wire-down' : 'wire-b');
-      s += C(oob.x + 90, oob.y + 50, pI.x + 22, pI.y, 'wire-ipmi');
+      const x = hx(i), y = HY, dn = fail.nodes.has(nd.id);
+      ports.forEach((p) => {
+        const sw = p[2] === 'A' ? torA : torB;
+        const isDown = fail.tors.has(p[2] === 'A' ? 'torA' : 'torB') || dn;
+        s += C(sw.x + 90, sw.y + 50, x + p[1] + pw / 2, y - 12, isDown ? 'wire-down' : (p[2] === 'A' ? 'wire-a' : 'wire-b'));
+      });
+      s += C(oob.x + 90, oob.y + 50, x + bmcX + 22, y - 12, 'wire-ipmi');
     });
 
     lab.nodes.forEach((nd, i) => {
@@ -162,32 +186,44 @@
       const down = fail.nodes.has(nd.id), cvmDown = fail.cvms.has(nd.id);
       const vms = vmsOn(nd.id).length + (pcOn(nd.id) ? 1 : 0);
       let h = G('node', nd.id, R(x, y, cw, HH, 'host' + (down ? ' down' : '')) + T(x + 10, y + HH - 12, nd.name, 't-title') + T(x + cw - 10, y + HH - 12, 'AHV', 't-muted', 'end'));
-      // ports on top edge
-      h += R(x + 14, y - 12, 50, 22, 'port', 4) + T(x + 39, y + 3, '25G-A', 't-small', 'middle');
-      h += R(x + 74, y - 12, 50, 22, 'port', 4) + T(x + 99, y + 3, '25G-B', 't-small', 'middle');
-      h += R(x + cw - 58, y - 12, 44, 22, 'ipmi', 4) + T(x + cw - 36, y + 3, 'BMC', 't-small', 'middle');
-      h += T(x + cw - 36, y + 26, nd.ipmiIp, 't-mono t-muted', 'middle').replace('class="', 'style="font-size:9px" class="');
-      // bond
-      h += L(x + 39, y + 10, x + 69, y + 50, 'wire') + L(x + 99, y + 10, x + 99, y + 50, 'wire');
-      h += G('netcfg', 'bond', R(x + 10, y + 50, cw - 20, 28, 'br') + T(x + cw / 2, y + 68, 'br0-up bond: ' + lab.network.bondMode, 't-small', 'middle'));
-      h += L(x + cw / 2, y + 78, x + cw / 2, y + 92, 'wire');
-      h += G('netcfg', 'vs', R(x + 10, y + 92, cw - 20, 42, 'br') + T(x + cw / 2, y + 109, 'br0  (virtual switch ' + String(lab.network.virtualSwitch).split(' ')[0] + ')', 't-small t-title', 'middle') + T(x + cw / 2, y + 126, 'AHV host ' + nd.hostIp, 't-mono', 'middle'));
-      // CVM and UVMs
-      h += L(x + 55, y + 134, x + 55, y + 154, 'wire') + L(x + 145, y + 134, x + 145, y + 154, 'wire');
-      h += G('cvm', nd.id, R(x + 10, y + 154, 92, 74, 'cvm' + (cvmDown || down ? ' down' : '')) + T(x + 56, y + 172, 'CVM', 't-title', 'middle') + T(x + 16, y + 190, 'eth0', 't-muted t-small') + T(x + 16, y + 203, nd.cvmIp, 't-mono') + T(x + 16, y + 220, 'eth1 192.168.5.2', 't-small'));
-      h += G('vmsof', nd.id, R(x + 108, y + 154, 82, 74, 'uvm' + (down ? ' down' : '')) + T(x + 149, y + 180, 'User VMs', 't-small t-title', 'middle') + T(x + 149, y + 202, vms, 't-title', 'middle').replace('t-title', 't-title" style="font-size:20px') + T(x + 149, y + 220, 'on this host', 't-muted', 'middle'));
-      h += L(x + 56, y + 228, x + 56, y + 244, 'wire');
-      h += R(x + 10, y + 244, cw - 20, 34, 'svc') + T(x + cw / 2, y + 259, 'virbr0  192.168.5.1', 't-small', 'middle') + T(x + cw / 2, y + 272, 'internal host to CVM link', 't-muted', 'middle').replace('class="', 'style="font-size:9.5px" class="');
+      ports.forEach((p) => { h += R(x + p[1], y - 12, pw, 22, 'port', 4) + T(x + p[1] + pw / 2, y + 3, p[0], 't-small', 'middle'); });
+      h += R(x + bmcX, y - 12, 44, 22, 'ipmi', 4) + T(x + bmcX + 22, y + 3, 'BMC', 't-small', 'middle');
+      h += T(x + bmcX + 22, y + 26, nd.ipmiIp, 't-mono t-muted', 'middle').replace('class="', 'style="font-size:9px" class="');
+      const cvmBox = (cx, w) => G('cvm', nd.id, R(cx, y + 158, w, 74, 'cvm' + (cvmDown || down ? ' down' : '')) + T(cx + w / 2, y + 176, 'CVM', 't-title', 'middle') + T(cx + 6, y + 194, 'eth0', 't-muted t-small') + T(cx + 6, y + 207, nd.cvmIp, 't-mono') + T(cx + 6, y + 224, 'eth1 192.168.5.2', 't-small'));
+      const uvmBox = (cx, w) => G('vmsof', nd.id, R(cx, y + 158, w, 74, 'uvm' + (down ? ' down' : '')) + T(cx + w / 2, y + 184, 'User VMs', 't-small t-title', 'middle') + T(cx + w / 2, y + 206, vms, 't-title', 'middle').replace('t-title', 't-title" style="font-size:20px') + T(cx + w / 2, y + 224, 'on this host', 't-muted', 'middle'));
+      if (two) {
+        const bw = 96, b0 = x + 8, b1 = x + 112;
+        h += L(x + 30, y + 10, b0 + 30, y + 48, 'wire') + L(x + 78, y + 10, b0 + 66, y + 48, 'wire');
+        h += L(x + 134, y + 10, b1 + 30, y + 48, 'wire') + L(x + 182, y + 10, b1 + 66, y + 48, 'wire');
+        h += G('netcfg', 'bond', R(b0, y + 48, bw, 36, 'br') + T(b0 + bw / 2, y + 63, 'br0-up bond', 't-small t-title', 'middle') + T(b0 + bw / 2, y + 77, lab.network.bondMode, 't-muted', 'middle'));
+        h += G('netcfg', 'bond1', R(b1, y + 48, bw, 36, 'uvm') + T(b1 + bw / 2, y + 63, 'br1-up bond', 't-small t-title', 'middle') + T(b1 + bw / 2, y + 77, lab.network.vmBondMode, 't-muted', 'middle'));
+        h += L(b0 + bw / 2, y + 84, b0 + bw / 2, y + 96, 'wire') + L(b1 + bw / 2, y + 84, b1 + bw / 2, y + 96, 'wire');
+        h += G('netcfg', 'vs', R(b0, y + 96, bw, 42, 'br') + T(b0 + bw / 2, y + 113, 'br0 / ' + vs0, 't-small t-title', 'middle') + T(b0 + bw / 2, y + 130, nd.hostIp, 't-mono', 'middle'));
+        h += G('netcfg', 'vs1', R(b1, y + 96, bw, 42, 'uvm') + T(b1 + bw / 2, y + 113, 'br1 / ' + vs1, 't-small t-title', 'middle') + T(b1 + bw / 2, y + 130, 'VM traffic only', 't-muted', 'middle'));
+        h += L(b0 + bw / 2, y + 138, b0 + bw / 2, y + 158, 'wire') + L(b1 + bw / 2, y + 138, b1 + bw / 2, y + 158, 'wire');
+        h += cvmBox(b0, bw) + uvmBox(b1, bw);
+        h += L(b0 + bw / 2, y + 232, b0 + bw / 2, y + 246, 'wire');
+        h += R(b0, y + 246, bw, 36, 'svc') + T(b0 + bw / 2, y + 261, 'virbr0', 't-small', 'middle') + T(b0 + bw / 2, y + 275, '192.168.5.1', 't-mono t-muted', 'middle');
+        h += T(b1 + bw / 2, y + 258, 'Host and CVM', 't-muted', 'middle') + T(b1 + bw / 2, y + 272, `use ${vs0}`, 't-muted', 'middle');
+      } else {
+        h += L(x + 39, y + 10, x + 69, y + 50, 'wire') + L(x + 99, y + 10, x + 99, y + 50, 'wire');
+        h += G('netcfg', 'bond', R(x + 10, y + 50, cw - 20, 28, 'br') + T(x + cw / 2, y + 68, 'br0-up bond: ' + lab.network.bondMode, 't-small', 'middle'));
+        h += L(x + cw / 2, y + 78, x + cw / 2, y + 96, 'wire');
+        h += G('netcfg', 'vs', R(x + 10, y + 96, cw - 20, 42, 'br') + T(x + cw / 2, y + 113, 'br0  (virtual switch ' + vs0 + ')', 't-small t-title', 'middle') + T(x + cw / 2, y + 130, 'AHV host ' + nd.hostIp, 't-mono', 'middle'));
+        h += L(x + 56, y + 138, x + 56, y + 158, 'wire') + L(x + 149, y + 138, x + 149, y + 158, 'wire');
+        h += cvmBox(x + 10, 92) + uvmBox(x + 108, 82);
+        h += L(x + 56, y + 232, x + 56, y + 246, 'wire');
+        h += R(x + 10, y + 246, cw - 20, 34, 'svc') + T(x + cw / 2, y + 261, 'virbr0  192.168.5.1', 't-small', 'middle') + T(x + cw / 2, y + 274, 'internal host to CVM link', 't-muted', 'middle').replace('class="', 'style="font-size:9.5px" class="');
+      }
       s += h;
     });
 
-    // VLAN legend
     const ly = HY + HH + 34;
     s += T(20, ly, 'Networks (click to edit)', 't-title');
     const chips = [
-      { type: 'netcfg', id: 'mgmt', label: `Mgmt VLAN ${lab.network.mgmtVlan}  ${lab.network.mgmtSubnet}  (${lab.network.mgmtTagging})`, cls: 'br' },
+      { type: 'netcfg', id: 'mgmt', label: `Mgmt VLAN ${lab.network.mgmtVlan}  ${lab.network.mgmtSubnet}  (${lab.network.mgmtTagging})${two ? '  on ' + vs0 : ''}`, cls: 'br' },
       { type: 'netcfg', id: 'ipmi', label: `IPMI VLAN ${lab.network.ipmiVlan}  ${lab.network.ipmiSubnet}`, cls: 'ipmi' }
-    ].concat(lab.network.vmNetworks.map((v) => ({ type: 'vmnet', id: v.id, label: `${v.name}  VLAN ${v.vlan}  ${v.subnet}`, cls: 'uvm' })));
+    ].concat(lab.network.vmNetworks.map((v) => ({ type: 'vmnet', id: v.id, label: `${v.name}  VLAN ${v.vlan}  ${v.subnet}${two ? '  on ' + (v.vs || 'vs0') : ''}`, cls: 'uvm' })));
     let cx = 20, cy = ly + 12;
     chips.forEach((c) => {
       const w = c.label.length * 6.4 + 20;
@@ -196,7 +232,10 @@
       cx += w + 10;
     });
     s += '</svg>';
-    return head('Network view', `Each AHV host connects both 25GbE ports to one bond (br0-up) on bridge br0, which backs virtual switch vs0. The CVM and AHV host share the management VLAN. Each CVM also has a private link to its own host on 192.168.5.0/24 through virbr0, which never leaves the host. MTU ${esc(lab.network.mtu)}.`, '<button class="btn" data-act="addNet">Add VM network</button>') + s;
+    const text = two
+      ? `Each AHV host has four 25GbE ports in two bonds, with one port of each bond on each ToR. br0-up (${esc(lab.network.bondMode)}) backs ${esc(vs0)} and carries the AHV host, CVM and management VLAN. br1-up (${esc(lab.network.vmBondMode)}) backs ${esc(vs1)} and carries only user VM VLANs, which keeps storage replication traffic separate from VM traffic. Each CVM also has a private link to its own host through virbr0. MTU ${esc(lab.network.mtu)}.`
+      : `Each AHV host connects both 25GbE ports to one bond (br0-up) on bridge br0, which backs virtual switch ${esc(vs0)}. The CVM and AHV host share the management VLAN. Each CVM also has a private link to its own host on 192.168.5.0/24 through virbr0, which never leaves the host. MTU ${esc(lab.network.mtu)}.`;
+    return head('Network view', text, '<button class="btn" data-act="addNet">Add VM network</button>') + s;
   };
 
   VIEWS.storage = function () {
@@ -421,7 +460,8 @@
 
     if (fail.tors.size === 1) {
       const sw = lab.switches.find((s) => fail.tors.has(s.id));
-      add('warn', `${sw.name} down`, `Each host loses one uplink. With the ${esc(lab.network.bondMode)} bond, traffic moves to the remaining uplink on the other switch. Expect a short interruption during failover. ${lab.network.bondMode === 'active-backup' ? 'Bandwidth does not change, because active-backup only uses one uplink at a time.' : 'Each host runs on half of its uplink bandwidth until the switch returns.'}`);
+      const bw = (mode, bond) => `${bond} (${esc(mode)}): traffic moves to the uplink on the other switch. ${mode === 'active-backup' ? 'Bandwidth does not change, because active-backup only uses one uplink at a time.' : 'It runs on half of its bandwidth until the switch returns.'}`;
+      add('warn', `${sw.name} down`, `Each bond on every host loses one uplink. Expect a short interruption during failover. ${bw(lab.network.bondMode, 'br0-up')}${lab.network.layout === '2x2' ? ' ' + bw(lab.network.vmBondMode, 'br1-up') : ''}`);
     } else if (fail.tors.size === 2) {
       add('bad', 'Both ToR switches down', 'Every host loses its data uplinks. CVMs cannot reach each other, so the cluster cannot serve storage and VMs lose network access. This is a full outage until at least one switch returns.');
     }
@@ -438,11 +478,12 @@
   const nodeOpts = () => lab.nodes.map((n) => [n.id, n.name]);
   const netOpts = () => [['', 'none']].concat(lab.network.vmNetworks.map((n) => [n.id, `${n.name} (VLAN ${n.vlan})`]));
 
+  const BONDS = [['active-backup', 'active-backup'], ['balance-slb', 'balance-slb'], ['balance-tcp', 'balance-tcp (LACP)']];
   function editorFor(type, id) {
     switch (type) {
       case 'node': {
         const n = node(id); if (!n) return null;
-        return { kind: 'Node', title: n.name, obj: n, fields: [F('name', 'Host name'), F('serial', 'Serial number'), F('hostIp', 'AHV host IP'), F('cvmIp', 'CVM IP'), F('ipmiIp', 'IPMI IP'), F('torAPort', 'TOR-A port'), F('torBPort', 'TOR-B port'), F('oobPort', 'OOB switch port')],
+        return { kind: 'Node', title: n.name, obj: n, fields: [F('name', 'Host name'), F('serial', 'Serial number'), F('hostIp', 'AHV host IP'), F('cvmIp', 'CVM IP'), F('ipmiIp', 'IPMI IP'), F('torAPort', lab.network.layout === '2x2' ? 'TOR-A port (vs0)' : 'TOR-A port'), F('torBPort', lab.network.layout === '2x2' ? 'TOR-B port (vs0)' : 'TOR-B port')].concat(lab.network.layout === '2x2' ? [F('torAPort2', 'TOR-A port (vs1)'), F('torBPort2', 'TOR-B port (vs1)')] : []).concat([F('oobPort', 'OOB switch port')]),
           note: `Hardware for all nodes is set in the hardware profile (homogeneous cluster).`, extra: hostSummary(id),
           del: lab.nodes.length > 3 ? () => removeNode(id) : null, delLabel: 'Remove node' };
       }
@@ -475,8 +516,8 @@
       }
       case 'vmnet': {
         const v = net(id); if (!v) return null;
-        return { kind: 'VM network', title: v.name, obj: v, fields: [F('name', 'Name'), F('vlan', 'VLAN ID', { num: 1 }), F('subnet', 'Subnet'), F('gateway', 'Gateway')],
-          note: 'VM networks are VLAN-backed subnets on virtual switch vs0. The VLAN must be trunked on both ToR ports for every host.',
+        return { kind: 'VM network', title: v.name, obj: v, fields: [F('name', 'Name'), F('vlan', 'VLAN ID', { num: 1 }), F('subnet', 'Subnet'), F('gateway', 'Gateway')].concat(lab.network.layout === '2x2' ? [F('vs', 'Virtual switch', { opts: [['vs0', 'vs0 (br0, with management)'], ['vs1', 'vs1 (br1, VM traffic)']] })] : []),
+          note: 'VM networks are VLAN-backed subnets on a virtual switch. The VLAN must be trunked on the ToR ports of that virtual switch for every host.',
           del: () => { lab.network.vmNetworks = lab.network.vmNetworks.filter((x) => x.id !== id); lab.vms.forEach((x) => { if (x.network === id) x.network = ''; }); }, delLabel: 'Delete network' };
       }
       case 'netcfg': {
@@ -484,7 +525,9 @@
           mgmt: { kind: 'Management network', fields: [F('mgmtVlan', 'VLAN ID', { num: 1 }), F('mgmtTagging', 'Tagging', { opts: [['Native (untagged)', 'Native (untagged)'], ['Tagged', 'Tagged']] }), F('mgmtSubnet', 'Subnet'), F('mgmtGateway', 'Gateway')], note: 'AHV hosts, CVMs, the cluster VIP, the data services IP and Prism Central share this network in the sample.' },
           ipmi: { kind: 'IPMI network', fields: [F('ipmiVlan', 'VLAN ID', { num: 1 }), F('ipmiSubnet', 'Subnet'), F('ipmiGateway', 'Gateway')], note: 'BMC interfaces, used by Foundation for imaging and for remote console.' },
           bond: { kind: 'Uplink bond', fields: [F('bondMode', 'Bond mode', { opts: [['active-backup', 'active-backup'], ['balance-slb', 'balance-slb'], ['balance-tcp', 'balance-tcp (LACP)']] }), F('mtu', 'MTU', { num: 1 })], note: 'active-backup uses one uplink at a time and needs no special switch configuration. balance-tcp requires LACP on the switch side.' },
-          vs: { kind: 'Virtual switch', fields: [F('virtualSwitch', 'Virtual switch'), F('bondMode', 'Bond mode', { opts: [['active-backup', 'active-backup'], ['balance-slb', 'balance-slb'], ['balance-tcp', 'balance-tcp (LACP)']] }), F('mtu', 'MTU', { num: 1 })], note: 'The default virtual switch vs0 maps to bridge br0 on every host.' }
+          vs: { kind: 'Virtual switch', fields: [F('layout', 'Uplink layout', { opts: [['1x2', '2 uplinks, one bond (vs0)'], ['2x2', '4 uplinks, two bonds (vs0 + vs1)']] }), F('virtualSwitch', 'Virtual switch'), F('bondMode', 'Bond mode', { opts: BONDS }), F('mtu', 'MTU', { num: 1 })], note: 'The default virtual switch vs0 maps to bridge br0 on every host and carries the AHV host and CVM traffic.' },
+          bond1: { kind: 'VM uplink bond', fields: [F('vmBondMode', 'Bond mode', { opts: BONDS })], note: 'br1-up carries only user VM traffic in the 2x2 layout.' },
+          vs1: { kind: 'VM virtual switch', fields: [F('vmSwitch', 'Virtual switch'), F('vmBondMode', 'Bond mode', { opts: BONDS })], note: 'A second virtual switch for user VM VLANs. Keeping VM traffic off vs0 isolates it from CVM replication traffic.' }
         }[id];
         return { kind: map.kind, title: map.kind, obj: lab.network, fields: map.fields, note: map.note };
       }
@@ -544,7 +587,9 @@
       if (el.dataset.list) val = String(val).split(',').map((x) => x.trim()).filter(Boolean);
       if (type === 'cluster' && k === 'rf' && val === 3 && lab.nodes.length < 5) { toast('RF3 needs at least 5 nodes'); el.value = String(ed.obj.rf); return; }
       ed.obj[k] = val;
+      normalize(lab);
       save(); render(false);
+      if (k === 'layout') { openEditor(type, id); return; }
       if (k === 'name') { const t = panel.querySelector('h3'); if (t) t.textContent = val; }
     };
     const del = $('#btnDel');
@@ -565,6 +610,7 @@
     const id = nextId('n', lab.nodes);
     const num = lab.nodes.length + 1;
     lab.nodes.push({ id, name: 'NTX-N' + num, serial: 'EXAMPLE-SN-' + String(num).padStart(2, '0'), hostIp: bumpIp(last.hostIp, 1), cvmIp: bumpIp(last.cvmIp, 1), ipmiIp: bumpIp(last.ipmiIp, 1), torAPort: 'Eth1/' + num, torBPort: 'Eth1/' + num, oobPort: 'Gi1/0/' + num });
+    normalize(lab);
     save(); render(); openEditor('node', id);
   }
   function removeNode(id) {
@@ -584,7 +630,7 @@
   function addNet() {
     const id = 'net-' + Date.now().toString(36);
     const vlan = Math.max(99, ...lab.network.vmNetworks.map((n) => Number(n.vlan) || 0)) + 10;
-    lab.network.vmNetworks.push({ id, name: 'VM-Net-' + vlan, vlan, subnet: `10.10.${vlan % 255}.0/24`, gateway: `10.10.${vlan % 255}.1` });
+    lab.network.vmNetworks.push({ id, name: 'VM-Net-' + vlan, vlan, subnet: `10.10.${vlan % 255}.0/24`, gateway: `10.10.${vlan % 255}.1`, vs: lab.network.layout === '2x2' ? 'vs1' : 'vs0' });
     save(); render(); openEditor('vmnet', id);
   }
   function addCtr() {
@@ -641,7 +687,9 @@
       render(false);
     });
     $('#btnTheme').onclick = () => { const d = document.documentElement; d.dataset.theme = d.dataset.theme === 'dark' ? 'light' : 'dark'; try { localStorage.setItem(THEME, d.dataset.theme); } catch (e) { /* ignore */ } };
-    $('#btnReset').onclick = () => { if (!confirmReset()) return; lab = window.NBL_SAMPLE(); fail.nodes.clear(); fail.cvms.clear(); fail.tors.clear(); fail.disk = ''; sel = null; save(); render(true); toast('Sample lab restored'); };
+    const ps = $('#presetSel');
+    ps.innerHTML = Object.keys(window.NBL_PRESETS).map((k) => `<option value="${k}"${lab.preset === k ? ' selected' : ''}>${esc(window.NBL_PRESETS[k].label)}</option>`).join('');
+    $('#btnReset').onclick = () => { if (!confirmReset()) return; lab = normalize(window.NBL_SAMPLE(ps.value)); fail.nodes.clear(); fail.cvms.clear(); fail.tors.clear(); fail.disk = ''; sel = null; save(); render(true); toast('Preset loaded'); };
     $('#btnExport').onclick = () => {
       const blob = new Blob([JSON.stringify(lab, null, 2)], { type: 'application/json' });
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = (lab.cluster.name || 'nutanix-lab') + '.json'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -649,7 +697,7 @@
     $('#btnImport').onclick = () => $('#fileImport').click();
     $('#fileImport').onchange = (e) => {
       const f = e.target.files[0]; if (!f) return;
-      f.text().then((txt) => { const l = JSON.parse(txt); if (!valid(l)) throw new Error('not a lab file'); lab = l; sel = null; save(); render(true); toast('Lab imported'); }).catch(() => toast('That file is not a Nutanix Build Lab export'));
+      f.text().then((txt) => { const l = JSON.parse(txt); if (!valid(l)) throw new Error('not a lab file'); lab = normalize(l); sel = null; save(); render(true); toast('Lab imported'); }).catch(() => toast('That file is not a Nutanix Build Lab export'));
       e.target.value = '';
     };
     $('#btnShare').onclick = () => {
@@ -659,7 +707,7 @@
     render(true);
   });
   let resetArmed = 0;
-  function confirmReset() { const now = Date.now(); if (now - resetArmed < 3000) { resetArmed = 0; return true; } resetArmed = now; toast('Click Reset sample again to confirm'); return false; }
+  function confirmReset() { const now = Date.now(); if (now - resetArmed < 3000) { resetArmed = 0; return true; } resetArmed = now; toast('Click Load preset again to replace the current lab'); return false; }
 
   let toastT;
   function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2200); }
