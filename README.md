@@ -18,6 +18,8 @@ Inspired by the NSX Build Lab at vconfig.pl.
 
 ## Using it
 
+- **Node type** (Physical section) picks the NX platform for the whole cluster. The CPU, memory, storage, NIC and GPU options follow that model's Nutanix specification sheet, and the rack view draws the real form factor (1U1N, 2U1N, 2U2N, 2U4N, 4U1N) with rack space and power per block. A model number decoder explains each digit of the name.
+
 - The left menu works like the NSX Build Lab: start from an **Empty lab** or a **Completed example**, then pick an object type (nodes, switches, cluster, storage, networking, management, VMs) to open its view and list its objects in the side panel. The counts show how many of each exist.
 - **Add-ons** (Flow Virtual Networking, Flow Network Security, Files, Objects, NDB, NKP, disaster recovery) are listed as coming soon.
 
@@ -42,6 +44,7 @@ To run it locally, open `public/index.html` in a browser, or serve the `public/`
 wrangler.jsonc           Cloudflare deployment settings
 public/index.html        page shell, toolbar and tabs
 public/css/style.css     light and dark theme, layout
+public/js/platforms.js   NX platform data extracted from the Nutanix specification sheets
 public/js/sample.js      the sample lab presets (all values are examples)
 public/js/app.js         views, editor panel, calculations, share/export
 ```

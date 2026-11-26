@@ -36,6 +36,7 @@
     if (!nw.vmSwitch) nw.vmSwitch = 'vs1 (br1)';
     if (!nw.vmBondMode) nw.vmBondMode = 'balance-slb';
     if (l.pc && l.pc.deployed === undefined) l.pc.deployed = true;
+    if (l.hardware.platform && l.hardware.storageIdx === undefined) applyPlatform(l.hardware, l.hardware.platform);
     if (!l.storage.poolName) l.storage.poolName = 'default-storage-pool';
     if (!l.cluster.peAuth) l.cluster.peAuth = 'Local admin only';
     if (!l.services.directoryTarget) l.services.directoryTarget = 'Prism Central only';
@@ -60,7 +61,59 @@
   const pcUp = () => !!(lab.pc && lab.pc.deployed !== false);
   const pcOn = (id) => (pcUp() && lab.pc.host === id ? lab.pc : null);
   const cores = () => lab.hardware.sockets * lab.hardware.coresPerSocket;
-  const nodeRawTB = () => lab.hardware.diskCount * lab.hardware.diskSizeTB;
+  const nodeRawTB = () => lab.hardware.diskCount * lab.hardware.diskSizeTB + (Number(lab.hardware.hddCount) || 0) * (Number(lab.hardware.hddSizeTB) || 0);
+  const nodeDrives = () => Number(lab.hardware.diskCount) + (Number(lab.hardware.hddCount) || 0);
+  /* ---------- platforms (NX node types) ---------- */
+  const PLATS = () => window.NBL_PLATFORMS || [];
+  const platOf = (hw) => PLATS().find((p) => p.model === hw.platform) || null;
+  const platform = () => platOf(lab.hardware);
+  const blockInfo = () => { const p = platform(); return p ? { u: p.rackU, n: p.nodesPerBlock } : { u: 1, n: 1 }; };
+  const closest = (arr, want) => arr.reduce((b, x) => (Math.abs(x - want) < Math.abs(b - want) ? x : b), arr[0]);
+  const cleanOpt = (x) => String(x).replace(/^\[[\d, ]+\]\s*x\s*/, '').trim();
+  const nicOptions = (p) => p.nicAiom.map((x) => 'AIOM: ' + cleanOpt(x)).concat(p.nicPcie.map((x) => 'PCIe: ' + cleanOpt(x)));
+  function applyStorage(hw) {
+    const p = platOf(hw); if (!p || !p.storage.length) return;
+    if (!p.storage[hw.storageIdx]) hw.storageIdx = 0;
+    const st = p.storage[hw.storageIdx], g1 = st.groups[0], g2 = st.groups[1];
+    hw.diskType = st.type; hw.diskMedia = g1.media;
+    const nz = g1.counts.filter((c) => c > 0);
+    hw.diskCount = closest(nz.length ? nz : g1.counts, Number(hw.diskCount) || 6);
+    hw.diskSizeTB = closest(g1.sizesTB, Number(hw.diskSizeTB) || 3.84);
+    if (g2) { hw.hddMedia = g2.media; hw.hddCount = closest(g2.counts, Number(hw.hddCount) || g2.counts[0]); hw.hddSizeTB = closest(g2.sizesTB, Number(hw.hddSizeTB) || g2.sizesTB[0]); }
+    else { hw.hddCount = 0; hw.hddSizeTB = 0; hw.hddMedia = ''; }
+  }
+  function applyPlatform(hw, model) {
+    hw.platform = model;
+    const p = platOf(hw);
+    if (!p) { if (hw.model && /^NX-/.test(hw.model)) hw.model = 'Generic node'; return; }
+    hw.model = p.model;
+    hw.sockets = p.sockets;
+    if (p.cpus.length) {
+      const want = Number(hw.coresPerSocket) || 24;
+      const cpu = p.cpus.reduce((b, c) => (Math.abs(c.cores - want) < Math.abs(b.cores - want) ? c : b), p.cpus[0]);
+      hw.cpuName = cpu.name; hw.coresPerSocket = cpu.cores;
+    } else hw.cpuName = p.cpuFamilies[0] || '';
+    if (p.memoryGB.length) hw.ramGB = closest(p.memoryGB, Number(hw.ramGB) || 1024);
+    let si = p.storage.findIndex((x) => x.type === 'All NVMe'); if (si < 0) si = 0;
+    hw.storageIdx = si; applyStorage(hw);
+    const nics = nicOptions(p);
+    const want = /25/.test(String(hw.dataNics)) ? nics.find((x) => /PCIe: .*25\/10GbE, 2-port SFP28/.test(x)) : null;
+    hw.dataNics = want || nics[0] || '';
+    hw.bmc = p.nicBoard.join('; ');
+    hw.bootDevice = p.boot;
+    hw.gpu = 'None';
+  }
+  function decodeModel(m) {
+    const r = /^NX-(\d)(\d)(\d)(\d)([A-Z]*)-G(\d+)$/.exec(m); if (!r) return null;
+    const miss = 'not in the naming legend';
+    const fam = { 1: 'Entry-level and ROBO', 3: 'Balanced compute and storage', 8: 'High performance', 9: 'Accelerated system' };
+    const ch = { 2: '1U-1NS', 3: '2U-2N', 5: '2U-1N', 6: '2U-4N', 7: '1U-1N' };
+    const dk = { 0: '2.5 in. disks', 1: 'E1.S disks', 3: 'E3.S disks', 5: '3.5 in. disks' };
+    const pt = { S: 'single socket', A: 'AMD platform', G: 'GPU platform' };
+    const gen = { 8: 'Intel Ice Lake', 9: 'Intel Sapphire Rapids and AMD Genoa', 10: 'Intel Granite Rapids and AMD Turin' };
+    return [['Series ' + r[1], fam[r[1]] || miss], ['Nodes digit ' + r[2], /[1-4]/.test(r[2]) ? r[2] + ' node' + (r[2] === '1' ? '' : 's') : miss], ['Chassis digit ' + r[3], ch[r[3]] || miss], ['Disk digit ' + r[4], dk[r[4]] || miss],
+      ['Platform type', r[5] ? r[5].split('').map((c) => pt[c] || c).join(', ') : 'Intel, dual socket'], ['Generation G' + r[6], gen[r[6]] || miss]];
+  }
   const ft = () => (Number(lab.cluster.rf) === 3 ? 2 : 1);
 
   function hostUse(id) {
@@ -128,19 +181,35 @@
       for (let p = 0; p < ports; p++) inner += `<rect x="${x0 + 90 + p * 7}" y="${y + 5}" width="5" height="8" class="port"/>`;
       s += G('switch', sw.id, inner);
     });
-    lab.nodes.forEach((n, i) => {
-      const u = 36 - i;
-      const y = uy(u) + 1;
-      const down = fail.nodes.has(n.id);
-      let inner = R(x0 + 2, y, rw - 4, U - 2, 'node-box' + (down ? ' down' : ''), 3);
-      inner += `<circle cx="${x0 + 12}" cy="${y + 9}" r="3" class="${down ? 'led-bad' : 'led-ok'}"/>`;
-      inner += T(x0 + 22, y + 13, n.name, 't-small t-title');
-      const shown = Math.min(lab.hardware.diskCount, 16);
-      for (let d = 0; d < shown; d++) inner += `<rect x="${x0 + 110 + d * 13}" y="${y + 3}" width="10" height="12" rx="1.5" class="bay"/>`;
-      if (lab.hardware.diskCount > 16) inner += T(x0 + 110 + 16 * 13 + 2, y + 13, '+' + (lab.hardware.diskCount - 16), 't-muted t-small');
-      s += G('node', n.id, inner);
-    });
-    s += T(x0 + rw / 2, top + units * U + 24, '42U rack, front view (example layout)', 't-muted', 'middle');
+    const bi = blockInfo();
+    let curU = 38, overflow = 0;
+    for (let b = 0; b * bi.n < lab.nodes.length; b++) {
+      const inBlock = lab.nodes.slice(b * bi.n, b * bi.n + bi.n);
+      const botU = curU - bi.u + 1;
+      if (botU < 1) { overflow += inBlock.length; continue; }
+      const by = uy(curU) + 1, bh = bi.u * U - 2;
+      if (bi.n > 1) s += G('hardware', 'hw', R(x0 + 2, by, rw - 4, bh, 'sw', 3));
+      const cwid = (rw - 4) / bi.n;
+      inBlock.forEach((n, k) => {
+        const down = fail.nodes.has(n.id);
+        const nx = x0 + 2 + k * cwid + (bi.n > 1 ? 2 : 0), nw = cwid - (bi.n > 1 ? 4 : 0), ny = by + (bi.n > 1 ? 2 : 0), nh = bh - (bi.n > 1 ? 4 : 0);
+        let inner = R(nx, ny, nw, nh, 'node-box' + (down ? ' down' : ''), 3);
+        inner += `<circle cx="${nx + 9}" cy="${ny + 8}" r="3" class="${down ? 'led-bad' : 'led-ok'}"/>`;
+        inner += T(nx + 17, ny + 12, n.name, 't-small t-title');
+        const drives = nodeDrives(), wide = bi.u === 1 && bi.n === 1;
+        const bw = wide ? 10 : 8, bhh = wide ? 12 : 8, sx = wide ? 13 : 10, sy = wide ? 14 : 10;
+        const bx0 = wide ? nx + 105 : nx + 5, by0 = wide ? ny + 2 : ny + 15;
+        const cols = Math.max(1, Math.floor(((wide ? nw - 110 : nw - 8)) / sx));
+        const rows = Math.max(1, Math.floor((ny + nh - by0 + 1) / sy));
+        const shown = Math.min(drives, cols * rows);
+        for (let d = 0; d < shown; d++) inner += `<rect x="${bx0 + (d % cols) * sx}" y="${by0 + Math.floor(d / cols) * sy}" width="${bw}" height="${bhh}" rx="1.5" class="bay${d >= lab.hardware.diskCount ? ' hdd' : ''}"/>`;
+        if (drives > shown) inner += T(nx + nw - 4, ny + 12, '+' + (drives - shown), 't-muted t-small', 'end');
+        s += G('node', n.id, inner);
+      });
+      curU -= bi.u;
+    }
+    if (overflow) s += T(x0 + rw / 2, uy(1) + 14, overflow + ' node(s) do not fit in this rack', 't-small', 'middle');
+    s += T(x0 + rw / 2, top + units * U + 24, '42U rack, front view (' + (platform() ? platform().formFactor + ' ' + platform().model : 'generic 1U nodes') + ')', 't-muted', 'middle');
     s += '</svg>';
 
     const two = lab.network.layout === '2x2';
@@ -151,16 +220,18 @@
     t += '</tbody></table>';
     t = '<div style="overflow-x:auto">' + t + '</div>';
 
-    const hw = lab.hardware;
+    const hw = lab.hardware, pl = platform(), blocks = Math.ceil(lab.nodes.length / blockInfo().n);
     const cards = `<div class="cards">
-      <div class="card obj" data-type="hardware" data-id="hw"><div class="lbl">Node model</div><div><b>${esc(hw.model)}</b></div></div>
-      <div class="card obj" data-type="hardware" data-id="hw"><div class="lbl">CPU per node</div><div class="big">${hw.sockets} x ${hw.coresPerSocket}c</div><div class="lbl">${cores()} physical cores</div></div>
+      <div class="card obj" data-type="hardware" data-id="hw"><div class="lbl">Node type</div><div><b>${esc(hw.model)}</b></div><div class="lbl">${pl ? esc(pl.formFactor + ', ' + (pl.nodesPerBlock > 1 ? pl.nodesPerBlock + ' nodes per block' : '1 node per block')) : 'generic values'}</div></div>
+      <div class="card obj" data-type="hardware" data-id="hw"><div class="lbl">CPU per node</div><div class="big">${hw.sockets} x ${hw.coresPerSocket}c</div><div class="lbl">${esc(hw.cpuName || '')} ${cores()} physical cores</div></div>
       <div class="card obj" data-type="hardware" data-id="hw"><div class="lbl">Memory per node</div><div class="big">${fmt(hw.ramGB, 0)} GB</div></div>
-      <div class="card obj" data-type="hardware" data-id="hw"><div class="lbl">Data drives per node</div><div class="big">${hw.diskCount} x ${hw.diskSizeTB} TB</div><div class="lbl">${esc(hw.diskType)}, boot on ${esc(hw.bootDevice)}</div></div>
+      <div class="card obj" data-type="hardware" data-id="hw"><div class="lbl">Data drives per node</div><div class="big">${hw.diskCount} x ${hw.diskSizeTB} TB</div>${Number(hw.hddCount) ? `<div class="lbl">+ ${hw.hddCount} x ${hw.hddSizeTB} TB ${esc(hw.hddMedia || 'HDD')}</div>` : ''}<div class="lbl">${esc(hw.diskType)}, boot on ${esc(hw.bootDevice)}</div></div>
       <div class="card obj" data-type="hardware" data-id="hw"><div class="lbl">NICs per node</div><div><b>${esc(hw.dataNics)}</b></div><div class="lbl">${esc(hw.bmc)}</div></div>
+      ${pl && pl.powerTypicalVA ? `<div class="card obj" data-type="hardware" data-id="hw"><div class="lbl">Rack space and power (${blocks} block${blocks === 1 ? '' : 's'})</div><div class="big">${blocks * pl.rackU}U</div><div class="lbl">${fmt(blocks * pl.powerTypicalVA, 0)} VA typical, ${fmt(blocks * pl.powerMaxVA, 0)} VA max</div></div>` : ''}
+      ${hw.gpu && hw.gpu !== 'None' ? `<div class="card obj" data-type="hardware" data-id="hw"><div class="lbl">GPU per node</div><div><b>${esc(hw.gpu)}</b></div></div>` : ''}
     </div>`;
 
-    return head('Physical view', `${lab.nodes.length} single-node 1U appliances, two data top-of-rack switches and one out-of-band switch for IPMI. ${lab.network.layout === '2x2' ? 'Each node has two data uplinks to each ToR (one per bond)' : 'Each node has one data uplink to each ToR'} and one BMC link to the OOB switch.`, '<button class="btn" data-act="addNode">Add node</button>') +
+    return head('Physical view', `${lab.nodes.length} ${esc(hw.model)} node${lab.nodes.length === 1 ? '' : 's'}${pl ? ' (' + esc(pl.formFactor) + ')' : ''}, two data top-of-rack switches and one out-of-band switch for IPMI. ${lab.network.layout === '2x2' ? 'Each node has two data uplinks to each ToR (one per bond)' : 'Each node has one data uplink to each ToR'} and one BMC link to the OOB switch.`, '<button class="btn" data-act="addNode">Add node</button>') +
       `<div class="two"><div>${s}</div><div><h3 style="margin:0">Cabling and addressing</h3><p class="muted" style="margin:2px 0 0">Click a row to edit the node, its ports and IP addresses.</p>${t}${cards}</div></div>`;
   };
 
@@ -593,9 +664,37 @@
         return { kind: 'Switch', title: s.name, obj: s, fields: [F('name', 'Name'), F('role', 'Role'), F('model', 'Model'), F('mgmtIp', 'Management IP')],
           note: s.id === 'oob' ? 'Carries the BMC (IPMI) links. Foundation uses IPMI to image nodes.' : 'Both ToR switches should be configured as a pair (MLAG, vPC or similar) with the same VLANs trunked to every host port.' };
       }
-      case 'hardware':
-        return { kind: 'Hardware profile', title: lab.hardware.model, obj: lab.hardware, fields: [F('model', 'Model'), F('sockets', 'CPU sockets', { num: 1 }), F('coresPerSocket', 'Cores per socket', { num: 1 }), F('ramGB', 'Memory per node (GB)', { num: 1 }), F('diskType', 'Drive type', { opts: [['NVMe', 'NVMe'], ['SSD', 'SSD'], ['SSD + HDD', 'SSD + HDD (hybrid)']] }), F('diskCount', 'Data drives per node', { num: 1 }), F('diskSizeTB', 'Drive size (TB)', { num: 1 }), F('bootDevice', 'Boot device'), F('dataNics', 'Data NICs'), F('bmc', 'BMC')],
-          note: 'Generic example values. Applies to every node.' };
+      case 'hardware': {
+        const p = platform();
+        const platOpts = [['', 'Generic node (enter values)']].concat(PLATS().map((x) => [x.model, `${x.model}  (${x.formFactor}, ${x.sockets === 2 ? 'dual' : 'single'} socket)`]));
+        if (p) {
+          const hw = lab.hardware, st = p.storage[hw.storageIdx] || p.storage[0], g1 = st.groups[0], g2 = st.groups[1];
+          const flds = [F('platform', 'Node type', { opts: platOpts })];
+          if (p.cpus.length) flds.push(F('cpuName', `CPU (${p.sockets === 2 ? 'two per node' : 'one per node'})`, { opts: p.cpus.map((c) => [c.name, `${c.name.replace('Intel Xeon® ', 'Xeon ').replace('AMD EPYC™ ', 'EPYC ')}  ${c.cores} cores, ${c.ghz} GHz`]) }));
+          if (p.memoryGB.length) flds.push(F('ramGB', 'Memory per node', { opts: p.memoryGB.map((m) => [m, m + ' GB']), num: 1 }));
+          flds.push(F('storageIdx', 'Storage configuration', { opts: p.storage.map((x, i) => [i, x.type + ': ' + x.config]), num: 1 }));
+          flds.push(F('diskCount', g1.media + ' drives per node', { opts: g1.counts.map((c) => [c, c]), num: 1 }), F('diskSizeTB', g1.media + ' drive size', { opts: g1.sizesTB.map((z) => [z, z + ' TB']), num: 1 }));
+          if (g2) flds.push(F('hddCount', g2.media + ' drives per node', { opts: g2.counts.map((c) => [c, c]), num: 1 }), F('hddSizeTB', g2.media + ' drive size', { opts: g2.sizesTB.map((z) => [z, z + ' TB']), num: 1 }));
+          flds.push(F('dataNics', 'Data NIC', { opts: nicOptions(p).map((x) => [x, x]) }));
+          if (p.gpu.length) flds.push(F('gpu', 'GPU', { opts: [['None', 'None']].concat(p.gpu.map((g) => [cleanOpt(g), g])) }));
+          const dec = decodeModel(p.model);
+          const extra = kv([['Form factor', p.formFactor + (p.nodesPerBlock > 1 ? ' (' + p.nodesPerBlock + ' nodes share one chassis)' : '')], ['Processor family', p.cpuFamilies.join('; ')], ['Boot', p.boot], ['Onboard network', p.nicBoard.join('; ')], ['Power per block', p.powerTypicalVA ? p.powerTypicalVA + ' VA typical, ' + p.powerMaxVA + ' VA max' : 'see spec sheet'], ['Dimensions per block', p.dimensions.replace(/ Width/, ', Width').replace(/ Depth/, ', Depth')]]) +
+            `<p class="muted" style="font-size:12.5px"><b>Use cases:</b> ${esc(p.useCases)}</p>` +
+            (p.banner.length ? `<p class="muted" style="font-size:12.5px">${esc(p.banner.join(' '))}</p>` : '') +
+            (dec ? '<div class="kind" style="margin-top:10px">Model number decoder</div>' + kv(dec) : '') +
+            `<p class="muted" style="font-size:12px">Options come from the ${esc(p.model)} specification sheet. Confirm the final configuration with Nutanix before ordering.</p>`;
+          return { kind: 'Node type', title: p.model, obj: hw, fields: flds, note: 'Applies to every node in the cluster. Pick the node type first; the CPU, memory, drive and NIC options follow its specification sheet.', extra,
+            onSet: (k, v) => {
+              if (k === 'platform') { applyPlatform(hw, v); return true; }
+              if (k === 'cpuName') { const c = p.cpus.find((x) => x.name === v); if (c) hw.coresPerSocket = c.cores; }
+              if (k === 'storageIdx') { applyStorage(hw); return true; }
+              return false;
+            } };
+        }
+        return { kind: 'Node type', title: lab.hardware.model, obj: lab.hardware, fields: [F('platform', 'Node type', { opts: platOpts }), F('model', 'Model'), F('sockets', 'CPU sockets', { num: 1 }), F('coresPerSocket', 'Cores per socket', { num: 1 }), F('ramGB', 'Memory per node (GB)', { num: 1 }), F('diskType', 'Drive type', { opts: [['NVMe', 'NVMe'], ['SSD', 'SSD'], ['SSD + HDD', 'SSD + HDD (hybrid)']] }), F('diskCount', 'Data drives per node', { num: 1 }), F('diskSizeTB', 'Drive size (TB)', { num: 1 }), F('bootDevice', 'Boot device'), F('dataNics', 'Data NICs'), F('bmc', 'BMC')],
+          note: 'Generic example values. Pick an NX node type to use the options from its specification sheet.',
+          onSet: (k, v) => { if (k === 'platform') { applyPlatform(lab.hardware, v); return true; } return false; } };
+      }
       case 'cvm':
       case 'cvmcfg':
         return { kind: 'Controller VM', title: type === 'cvm' ? 'CVM on ' + (node(id) || {}).name : 'CVM sizing', obj: lab.cvm, fields: [F('vcpu', 'vCPU per CVM', { num: 1 }), F('ramGB', 'Memory per CVM (GB)', { num: 1 })],
@@ -699,6 +798,7 @@
       const oldVal = ed.obj[k];
       ed.obj[k] = val;
       if (type === 'cluster' && k === 'name' && oldVal && val) renameFromCluster(String(oldVal), String(val));
+      if (ed.onSet && ed.onSet(k, val)) { normalize(lab); save(); render(false); openEditor(type, id); return; }
       normalize(lab);
       save(); render(false);
       if (k === 'layout') { openEditor(type, id); return; }
@@ -782,6 +882,7 @@
       { g: 'Completed examples', items: Object.keys(window.NBL_PRESETS).map((k) => ({ id: 'preset-' + k, icon: '▸', label: window.NBL_PRESETS[k].short || window.NBL_PRESETS[k].label, act: 'preset:' + k })) },
       { g: 'Learn', items: [{ id: 'concepts', icon: '?', label: 'Nutanix concepts', view: 'concepts' }] },
       { g: 'Physical', items: [
+        { id: 'nodetype', icon: '◧', label: 'Node type', view: 'physical', edit: ['hardware', 'hw'] },
         { id: 'nodes', icon: '▤', label: 'Nodes', view: 'physical', list: 'nodes', count: lab.nodes.length },
         { id: 'switches', icon: '⇄', label: 'Switches and cabling', view: 'physical', list: 'switches', count: lab.switches.length }] },
       { g: 'Cluster', items: [
