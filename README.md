@@ -44,7 +44,7 @@ To run it locally, open `public/index.html` in a browser, or serve the `public/`
 wrangler.jsonc           Cloudflare deployment settings
 public/index.html        page shell, toolbar and tabs
 public/css/style.css     light and dark theme, layout
-public/js/platforms.js   NX platform data extracted from the Nutanix specification sheets
+public/js/platforms.js   NX platform data extracted from the Nutanix specification sheets and system specifications
 public/js/sample.js      the sample lab presets (all values are examples)
 public/js/app.js         views, editor panel, calculations, share/export
 ```

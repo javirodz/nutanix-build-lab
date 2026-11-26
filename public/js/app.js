@@ -227,7 +227,7 @@
       <div class="card obj" data-type="hardware" data-id="hw"><div class="lbl">Memory per node</div><div class="big">${fmt(hw.ramGB, 0)} GB</div></div>
       <div class="card obj" data-type="hardware" data-id="hw"><div class="lbl">Data drives per node</div><div class="big">${hw.diskCount} x ${hw.diskSizeTB} TB</div>${Number(hw.hddCount) ? `<div class="lbl">+ ${hw.hddCount} x ${hw.hddSizeTB} TB ${esc(hw.hddMedia || 'HDD')}</div>` : ''}<div class="lbl">${esc(hw.diskType)}, boot on ${esc(hw.bootDevice)}</div></div>
       <div class="card obj" data-type="hardware" data-id="hw"><div class="lbl">NICs per node</div><div><b>${esc(hw.dataNics)}</b></div><div class="lbl">${esc(hw.bmc)}</div></div>
-      ${pl && pl.powerTypicalVA ? `<div class="card obj" data-type="hardware" data-id="hw"><div class="lbl">Rack space and power (${blocks} block${blocks === 1 ? '' : 's'})</div><div class="big">${blocks * pl.rackU}U</div><div class="lbl">${fmt(blocks * pl.powerTypicalVA, 0)} VA typical, ${fmt(blocks * pl.powerMaxVA, 0)} VA max</div></div>` : ''}
+      ${pl && pl.powerTypicalVA ? `<div class="card obj" data-type="hardware" data-id="hw"><div class="lbl">Rack space and power (${blocks} block${blocks === 1 ? '' : 's'})</div><div class="big">${blocks * pl.rackU}U</div><div class="lbl">${fmt(blocks * pl.powerTypicalVA, 0)} VA typical, ${fmt(blocks * pl.powerMaxVA, 0)} VA max${pl.sys && pl.sys.powerSupply.length ? '<br>' + esc(pl.sys.powerSupply.join('; ')) + ' per block' + (pl.sys.psu ? (pl.sys.psu.redundant110V === 'Yes' ? ', redundant at 110 V and 208-240 V' : (pl.sys.psu.redundant208to240V === 'Yes' ? ', redundant only at 208-240 V' : ', not redundant')) : '') : ''}</div></div>` : ''}
       ${hw.gpu && hw.gpu !== 'None' ? `<div class="card obj" data-type="hardware" data-id="hw"><div class="lbl">GPU per node</div><div><b>${esc(hw.gpu)}</b></div></div>` : ''}
     </div>`;
 
@@ -678,10 +678,25 @@
           flds.push(F('dataNics', 'Data NIC', { opts: nicOptions(p).map((x) => [x, x]) }));
           if (p.gpu.length) flds.push(F('gpu', 'GPU', { opts: [['None', 'None']].concat(p.gpu.map((g) => [cleanOpt(g), g])) }));
           const dec = decodeModel(p.model);
+          const sy = p.sys;
+          const dimm = sy ? sy.dimms.filter((x) => new RegExp('= ' + hw.ramGB + ' ?GB').test(x)) : [];
+          const psuTxt = sy && sy.powerSupply.length ? sy.powerSupply.join('; ') + (sy.psu ? `, redundant at 110 V: ${sy.psu.redundant110V}, at 208-240 V: ${sy.psu.redundant208to240V}` : '') : '';
+          const det = (title, body) => body ? `<details class="det"><summary>${esc(title)}</summary>${body}</details>` : '';
+          const list = (arr) => arr && arr.length ? '<ul class="dl">' + arr.map((x) => `<li>${esc(x)}</li>`).join('') + '</ul>' : '';
+          const sysHtml = sy ? '<div class="kind" style="margin-top:12px">From the system specifications</div>' +
+            kv([['Chassis', sy.chassis.join('; ')], ['Memory layout', dimm.length ? dimm.join(' or ') : 'see DIMM layouts'], ['Power supplies', psuTxt || 'see system specifications'], ['Power cables', sy.powerCable.join('; ')], ['Fans', sy.fans], ['TPM', sy.tpm.join('; ')]].filter((r) => r[1])) +
+            det('Node naming and drive population', `<p class="small">${esc(sy.overview).replace(/\n/g, '<br>')}</p>` + (sy.driveConfigs.filter((d) => d[1]).length ? kv(sy.driveConfigs.filter((d) => d[1])) : '') + list(sy.driveRules)) +
+            det('Back panel (' + sy.backPanel.length + ' items)', sy.backPanel.length ? '<table class="grid mini"><tbody>' + sy.backPanel.map((b) => `<tr><td class="mono">${esc(b[0])}</td><td>${esc(b[1])}</td></tr>`).join('') + '</tbody></table>' : '') +
+            det('Front control panel', sy.controlPanel.length ? '<table class="grid mini"><tbody>' + sy.controlPanel.map((b) => `<tr><td class="mono">${esc(b[0])}</td><td>${esc(b[1])}</td></tr>`).join('') + '</tbody></table>' : '') +
+            det('Supported DIMM layouts', list(sy.dimms)) +
+            det('Internal components', list(sy.components)) +
+            `<p class="muted" style="font-size:12px">Source: ${esc(sy.file)}</p>`
+            : '<p class="muted" style="font-size:12px;margin-top:10px">No system specifications document is loaded for this model yet.</p>';
           const extra = kv([['Form factor', p.formFactor + (p.nodesPerBlock > 1 ? ' (' + p.nodesPerBlock + ' nodes share one chassis)' : '')], ['Processor family', p.cpuFamilies.join('; ')], ['Boot', p.boot], ['Onboard network', p.nicBoard.join('; ')], ['Power per block', p.powerTypicalVA ? p.powerTypicalVA + ' VA typical, ' + p.powerMaxVA + ' VA max' : 'see spec sheet'], ['Dimensions per block', p.dimensions.replace(/ Width/, ', Width').replace(/ Depth/, ', Depth')]]) +
             `<p class="muted" style="font-size:12.5px"><b>Use cases:</b> ${esc(p.useCases)}</p>` +
             (p.banner.length ? `<p class="muted" style="font-size:12.5px">${esc(p.banner.join(' '))}</p>` : '') +
             (dec ? '<div class="kind" style="margin-top:10px">Model number decoder</div>' + kv(dec) : '') +
+            sysHtml +
             `<p class="muted" style="font-size:12px">Options come from the ${esc(p.model)} specification sheet. Confirm the final configuration with Nutanix before ordering.</p>`;
           return { kind: 'Node type', title: p.model, obj: hw, fields: flds, note: 'Applies to every node in the cluster. Pick the node type first; the CPU, memory, drive and NIC options follow its specification sheet.', extra,
             onSet: (k, v) => {

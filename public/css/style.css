@@ -225,3 +225,11 @@ table.grid tr.sel td { background: var(--accent-soft); }
   .sgroup { flex: none; margin: 0; }
   .sitem { white-space: nowrap; }
 }
+
+.det { border: 1px solid var(--line); border-radius: 6px; margin: 6px 0; background: var(--surface-2); }
+.det summary { cursor: pointer; padding: 6px 10px; font-size: 13px; font-weight: 600; }
+.det > *:not(summary) { margin: 0 10px 8px; }
+.det .small, p.small { font-size: 12.5px; line-height: 1.5; }
+ul.dl { padding-left: 18px; font-size: 12.5px; margin: 4px 10px 8px; }
+table.grid.mini { margin-top: 0; font-size: 12px; }
+table.grid.mini td { white-space: normal; padding: 4px 6px; }
