@@ -254,3 +254,7 @@ svg .p-a { fill: var(--link-a); }
 svg .p-b { fill: var(--link-b); }
 .rearwrap { margin-top: 6px; overflow-x: auto; }
 .legend i { border-radius: 2px; }
+
+.kofi { display: inline-flex; align-items: center; gap: 4px; background: #ff5e5b; color: #fff; border-radius: 6px; padding: 6px 12px; text-decoration: none; font-weight: 600; }
+.kofi:hover { background: #e94d4a; }
+.foot a { color: var(--accent); }
