@@ -233,3 +233,24 @@ table.grid tr.sel td { background: var(--accent-soft); }
 ul.dl { padding-left: 18px; font-size: 12.5px; margin: 4px 10px 8px; }
 table.grid.mini { margin-top: 0; font-size: 12px; }
 table.grid.mini td { white-space: normal; padding: 4px 6px; }
+
+/* rear panel */
+svg.rear { margin-top: 4px; }
+svg .rearbox { fill: var(--surface-2); stroke: var(--muted); stroke-width: 1.5; }
+svg .r-area { fill: none; stroke: var(--line); stroke-dasharray: 4 3; }
+svg .r-area.empty { fill: var(--surface); }
+svg .r-psu { fill: #475569; stroke: #334155; }
+[data-theme="dark"] svg .r-psu { fill: #334155; stroke: #64748b; }
+svg .r-psu + text, svg .r-psu ~ text { fill: #fff; }
+svg .r-sock { fill: #111827; }
+svg .r-card { fill: var(--accent-soft); stroke: var(--accent); }
+svg .r-gpu { fill: var(--cvm-soft); stroke: var(--cvm); }
+svg .r-slot { fill: var(--surface); stroke: var(--muted); stroke-dasharray: 3 2; }
+svg .r-misc { fill: var(--sw-soft); stroke: var(--sw); stroke-width: .8; }
+svg .r-ipmi { fill: var(--ipmi-soft); stroke: var(--ipmi); stroke-width: 1.5; }
+svg .rport { stroke: var(--ink); stroke-width: .8; }
+svg .p-off { fill: var(--surface); }
+svg .p-a { fill: var(--link-a); }
+svg .p-b { fill: var(--link-b); }
+.rearwrap { margin-top: 6px; overflow-x: auto; }
+.legend i { border-radius: 2px; }

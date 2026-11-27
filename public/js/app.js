@@ -103,6 +103,97 @@
     hw.bootDevice = p.boot;
     hw.gpu = 'None';
   }
+  /* ---------- rear panel and port plan ---------- */
+  const rearOf = (p) => (p && window.NBL_REAR ? window.NBL_REAR[p.model] : null);
+  function portPlan() {
+    const p = platform(), rl = rearOf(p); if (!rl) return null;
+    const hw = lab.hardware, two = lab.network.layout === '2x2', need = two ? 4 : 2;
+    const opt = String(hw.dataNics || '');
+    const items = rl.items || rl.node;
+    const nicSlots = items.filter((i) => i.k === 'slot' && i.nic).sort((a, b) => a.nic - b.nic);
+    let cards = [], per = 2, kind = 'pcie';
+    if (/^AIOM/.test(opt)) {
+      kind = 'aiom';
+      cards = items.filter((i) => i.k === 'aiom').sort((a, b) => (a.id === 'AIOM' ? 0 : 1) - (b.id === 'AIOM' ? 0 : 1));
+      per = /\+ 2P/.test(opt) ? 4 : 2;
+    } else {
+      per = /4-port|\b4P\b/i.test(opt) ? 4 : 2;
+      cards = nicSlots;
+    }
+    if (!cards.length) return null;
+    const used = cards.slice(0, Math.min(cards.length, Math.ceil(need / per)));
+    const name = (c, i) => (c.k === 'slot' ? 'NIC' + c.nic : c.id) + '-' + i;
+    const order = [];
+    for (let i = 1; i <= per; i++) used.forEach((c) => order.push({ item: c, i, name: name(c, i) }));
+    let ports = order.slice(0, need);
+    if (ports.length < need && kind === 'aiom' && nicSlots.length) {
+      const c = nicSlots[0]; used.push(c);
+      for (let i = 1; ports.length < need; i++) ports.push({ item: c, i, name: name(c, i), extra: 1 });
+    }
+    return { per, kind, used, ports, ipmi: items.find((i) => i.k === 'ipmi') };
+  }
+  function rearSVG(p, rl, blockNodes) {
+    const W = 920, H = Math.round(W * (rl.u * 1.75 / 17.2) * (rl.u >= 4 ? 1 : 1.5));
+    const plan = portPlan();
+    const two = lab.network.layout === '2x2';
+    const fields = two ? ['torAPort', 'torBPort', 'torAPort2', 'torBPort2'] : ['torAPort', 'torBPort'];
+    const sws = two ? ['torA', 'torB', 'torA', 'torB'] : ['torA', 'torB'];
+    const swName = (id) => (lab.switches.find((x) => x.id === id) || {}).name || id;
+    const areas = rl.nodes || [{ n: 'A', x: 0, y: 0, w: 1, h: 1 }];
+    const single = areas.length === 1;
+    const its = rl.items || rl.node;
+    let s = `<svg class="diagram rear" viewBox="0 -18 ${W} ${H + 40}"><rect x="0" y="0" width="${W}" height="${H}" rx="5" class="rearbox"/>`;
+    const tt = (t) => `<title>${esc(t)}</title>`;
+    function ports(it, X, Y, Wd, Ht, nd, n) {
+      let out = '';
+      const vert = it.vertical;
+      const len = vert ? Ht : Wd;
+      const pw = Math.max(6, Math.min(26, (len - 8) / n - 4)), ph = Math.max(6, Math.min(16, (vert ? Wd : Ht) * 0.45));
+      for (let j = 0; j < n; j++) {
+        const num = it.rtl ? n - j : j + 1;
+        const off = 4 + (len - 8 - n * (pw + 4)) / 2 + j * (pw + 4) + 2;
+        const px = vert ? X + (Wd - ph) / 2 : X + off, py = vert ? Y + off : Y + Ht - ph - 3;
+        const k = plan && nd ? plan.ports.findIndex((q) => q.item === it && q.i === num) : -1;
+        const cls = k >= 0 ? (sws[k] === 'torA' ? 'p-a' : 'p-b') : 'p-off';
+        const w = vert ? ph : pw, h = vert ? pw : ph;
+        out += `<rect x="${px}" y="${py}" width="${w}" height="${h}" rx="1.5" class="rport ${cls}">${tt((it.id || it.l) + ' port ' + num + (k >= 0 ? ': ' + swName(sws[k]) + ' ' + nd[fields[k]] : ''))}</rect>`;
+        if (!vert && pw >= 12) out += `<text x="${px + pw / 2}" y="${py + ph - 3}" class="t-small" text-anchor="middle" style="font-size:8px">${num}</text>`;
+        if (k >= 0 && single) out += `<text x="${px + w / 2}" y="${Y - 4 - (j % 2) * 10}" class="t-mono" text-anchor="middle" style="font-size:9px">${esc(swName(sws[k]) + ' ' + nd[fields[k]])}</text>`;
+      }
+      return out;
+    }
+    function item(it, a, nd) {
+      const X = (a.x + it.x * a.w) * W, Y = (a.y + it.y * a.h) * H, Wd = it.w * a.w * W, Ht = it.h * a.h * H;
+      const used = plan && nd && plan.used.includes(it);
+      let cls = 'r-misc', body = '', label = it.l;
+      if (it.k === 'psu') cls = it.empty ? 'r-slot' : 'r-psu';
+      else if (it.k === 'slot') {
+        const gpu = !it.nic && /GPU/.test(it.l) && lab.hardware.gpu && lab.hardware.gpu !== 'None';
+        cls = used ? 'r-card' : (gpu ? 'r-gpu' : 'r-slot');
+        if (used) body = ports(it, X, Y, Wd, Ht, nd, plan.per);
+      } else if (it.k === 'aiom' || it.k === 'lom') {
+        cls = 'r-card';
+        body = ports(it, X, Y, Wd, Ht, nd, used && plan.kind === 'aiom' && it.k === 'aiom' ? plan.per : it.ports || 2);
+      } else if (it.k === 'ipmi') {
+        cls = nd ? 'r-ipmi' : 'r-misc';
+        if (nd && single) body = `<text x="${X + Wd / 2}" y="${Y - 4}" class="t-mono" text-anchor="middle" style="font-size:9px">${esc(swName('oob') + ' ' + nd.oobPort)}</text>`;
+      }
+      let t = `<g>${tt(it.l + (it.note ? '. ' + it.note : ''))}<rect x="${X}" y="${Y}" width="${Wd}" height="${Ht}" rx="2" class="${cls}"/>`;
+      if (it.k === 'psu' && !it.empty) t += `<rect x="${X + Wd * 0.55}" y="${Y + Ht * 0.25}" width="${Math.min(Wd * 0.3, 22)}" height="${Ht * 0.5}" rx="2" class="r-sock"/>`;
+      const fs = Wd > 120 ? 10 : 9;
+      if (Wd > 34 && Ht > 12 && !it.vertical) t += `<text x="${X + 4}" y="${Y + fs + 2}" class="t-small" style="font-size:${fs}px">${esc(Wd < 70 ? label.split(' ')[0] : label)}</text>`;
+      if (it.vertical) t += `<text x="${X + Wd / 2}" y="${Y + 12}" class="t-small" text-anchor="middle" style="font-size:9px">${esc(label.replace(/^Slot (\d+).*/, '$1'))}</text>`;
+      return t + body + '</g>';
+    }
+    (rl.shared || []).forEach((it) => { s += item(it, { x: 0, y: 0, w: 1, h: 1 }, null); });
+    areas.forEach((a) => {
+      const nd = blockNodes['ABCD'.indexOf(a.n)];
+      if (rl.nodes) s += `<rect x="${a.x * W + 2}" y="${a.y * H + 2}" width="${a.w * W - 4}" height="${a.h * H - 4}" rx="3" class="r-area${nd ? '' : ' empty'}"/>` + T(a.x * W + a.w * W - 6, a.y * H + 14, 'Node ' + a.n + (nd ? ': ' + nd.name : ' (empty)'), 't-small t-title', 'end');
+      if (rl.nodes && !nd) return;
+      its.forEach((it) => { s += item(it, a, nd || null); });
+    });
+    return s + '</svg>';
+  }
   function decodeModel(m) {
     const r = /^NX-(\d)(\d)(\d)(\d)([A-Z]*)-G(\d+)$/.exec(m); if (!r) return null;
     const miss = 'not in the naming legend';
@@ -231,8 +322,22 @@
       ${hw.gpu && hw.gpu !== 'None' ? `<div class="card obj" data-type="hardware" data-id="hw"><div class="lbl">GPU per node</div><div><b>${esc(hw.gpu)}</b></div></div>` : ''}
     </div>`;
 
+    let rear = '';
+    const rl = rearOf(pl);
+    if (rl && lab.nodes.length) {
+      const npb = blockInfo().n;
+      const si = sel && sel.type === 'node' ? lab.nodes.findIndex((x) => x.id === sel.id) : -1;
+      const b = si >= 0 ? Math.floor(si / npb) : 0;
+      const bn = lab.nodes.slice(b * npb, b * npb + npb);
+      const plan = portPlan();
+      rear = `<div class="rearwrap"><h3 style="margin:16px 0 2px">${rl.frontIO ? 'I/O panel (front of chassis)' : 'Rear panel'}: ${esc(pl.model)}, block ${b + 1} (${esc(bn.map((x) => x.name).join(', '))})</h3>` +
+        `<p class="muted" style="margin:0 0 6px">Schematic traced from the back panel figure in the Nutanix system specifications; not to scale. Hover a component for its name. ${npb > 1 || lab.nodes.length > 1 ? 'Click a node in the rack to show its block. ' : ''}${rl.frontIO ? 'This model has its I/O ports on the front. ' : ''}</p>` +
+        rearSVG(pl, rl, bn) +
+        `<div class="legend"><span><i style="background:var(--link-a)"></i>Cabled to TOR-A</span><span><i style="background:var(--link-b)"></i>Cabled to TOR-B</span><span><i style="background:var(--ipmi)"></i>Cabled to OOB (IPMI)</span><span><i style="background:var(--accent-soft);border:1px solid var(--accent)"></i>Card installed</span><span><i style="border:1px dashed var(--muted)"></i>Empty slot</span></div>` +
+        (plan ? `<p class="muted" style="font-size:12.5px;margin:0">Data uplinks: ${esc(plan.ports.map((q) => q.name).join(', '))}. ${plan.kind === 'aiom' ? 'AIOM ports are used for data; AIOM port 1 is shared with IPMI.' : (plan.used.length > 1 ? 'Each bond spans two NIC cards, so a card failure does not take down a bond.' : 'Both uplinks are on NIC 1; pick four uplinks or a second card for card-level redundancy.')}${plan.ports.some((q) => q.extra) ? ' The AIOM has only two ports, so NIC 1 carries the second bond.' : ''} ${rl.notes ? esc(rl.notes) : ''}</p>` : '') + '</div>';
+    }
     return head('Physical view', `${lab.nodes.length} ${esc(hw.model)} node${lab.nodes.length === 1 ? '' : 's'}${pl ? ' (' + esc(pl.formFactor) + ')' : ''}, two data top-of-rack switches and one out-of-band switch for IPMI. ${lab.network.layout === '2x2' ? 'Each node has two data uplinks to each ToR (one per bond)' : 'Each node has one data uplink to each ToR'} and one BMC link to the OOB switch.`, '<button class="btn" data-act="addNode">Add node</button>') +
-      `<div class="two"><div>${s}</div><div><h3 style="margin:0">Cabling and addressing</h3><p class="muted" style="margin:2px 0 0">Click a row to edit the node, its ports and IP addresses.</p>${t}${cards}</div></div>`;
+      `<div class="two"><div>${s}</div><div><h3 style="margin:0">Cabling and addressing</h3><p class="muted" style="margin:2px 0 0">Click a row to edit the node, its ports and IP addresses.</p>${t}${cards}</div></div>` + rear;
   };
 
   VIEWS.network = function () {
@@ -246,6 +351,9 @@
     const ports = two
       ? [['A1', 8, 'torA', 'torAPort'], ['B1', 56, 'torB', 'torBPort'], ['A2', 112, 'torA', 'torAPort2'], ['B2', 160, 'torB', 'torBPort2']]
       : [['25G-A', 14, 'torA', 'torAPort'], ['25G-B', 74, 'torB', 'torBPort']];
+    const plan = portPlan();
+    if (plan) ports.forEach((pp, ix) => { if (plan.ports[ix]) pp[0] = plan.ports[ix].name; });
+    const bmcLbl = plan && plan.ipmi ? 'IPMI' : 'BMC';
     const pw = two ? 44 : 50;
     const bmcX = cw - (two ? 54 : 58);
 
@@ -315,8 +423,8 @@
       const down = fail.nodes.has(nd.id), cvmDown = fail.cvms.has(nd.id);
       const vms = vmsOn(nd.id).length + (pcOn(nd.id) ? 1 : 0);
       let h = G('node', nd.id, R(x, y, cw, HH, 'host' + (down ? ' down' : '')) + T(x + 10, y + HH - 12, nd.name, 't-title'));
-      ports.forEach((p) => { h += R(x + p[1], y - 12, pw, 22, 'port', 4) + T(x + p[1] + pw / 2, y + 3, p[0], 't-small', 'middle'); });
-      h += R(x + bmcX, y + HH - 11, 44, 22, 'ipmi', 4) + T(x + bmcX + 22, y + HH + 4, 'BMC', 't-small', 'middle');
+      ports.forEach((p) => { h += R(x + p[1], y - 12, pw, 22, 'port', 4) + T(x + p[1] + pw / 2, y + 3, p[0], 't-small', 'middle').replace('class="', p[0].length > 5 ? 'style="font-size:9px" class="' : 'class="'); });
+      h += R(x + bmcX, y + HH - 11, 44, 22, 'ipmi', 4) + T(x + bmcX + 22, y + HH + 4, bmcLbl, 't-small', 'middle');
       h += T(x + cw - 8, y + HH - 16, 'BMC ' + nd.ipmiIp, 't-mono t-muted', 'end').replace('class="', 'style="font-size:9px" class="');
       const cvmBox = (cx, w) => G('cvm', nd.id, R(cx, y + 158, w, 74, 'cvm' + (cvmDown || down ? ' down' : '')) + T(cx + w / 2, y + 176, 'CVM', 't-title', 'middle') + T(cx + 6, y + 194, 'eth0', 't-muted t-small') + T(cx + 6, y + 207, nd.cvmIp, 't-mono') + T(cx + 6, y + 224, 'eth1 192.168.5.2', 't-small'));
       const uvmBox = (cx, w) => G('vmsof', nd.id, R(cx, y + 158, w, 74, 'uvm' + (down ? ' down' : '')) + T(cx + w / 2, y + 184, 'User VMs', 't-small t-title', 'middle') + T(cx + w / 2, y + 206, vms, 't-title', 'middle').replace('t-title', 't-title" style="font-size:20px') + T(cx + w / 2, y + 224, 'on this host', 't-muted', 'middle'));
